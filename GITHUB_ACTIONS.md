@@ -30,7 +30,7 @@ Before using GitHub Actions automation, you need:
 
 Create a Service Principal with the necessary permissions:
 
-```bash
+```powershell
 # Login to Azure
 az login
 
@@ -38,10 +38,10 @@ az login
 az account set --subscription "YOUR_SUBSCRIPTION_ID"
 
 # Create service principal
-az ad sp create-for-rbac \
-  --name "PurpleCloud-GitHub-Actions" \
-  --role "Owner" \
-  --scopes /subscriptions/YOUR_SUBSCRIPTION_ID \
+az ad sp create-for-rbac `
+  --name "PurpleCloud-GitHub-Actions" `
+  --role "Owner" `
+  --scopes /subscriptions/YOUR_SUBSCRIPTION_ID `
   --sdk-auth
 ```
 
@@ -69,32 +69,32 @@ The output should look like:
 
 Assign additional permissions for Azure AD:
 
-```bash
+```powershell
 # Get the Service Principal Object ID
-SP_OBJECT_ID=$(az ad sp list --display-name "PurpleCloud-GitHub-Actions" --query "[0].id" -o tsv)
+$SP_OBJECT_ID = az ad sp list --display-name "PurpleCloud-GitHub-Actions" --query "[0].id" -o tsv
 
 # Assign Global Administrator role (required for Azure AD user/app creation)
 # Note: You must be a Global Administrator to run this
-az rest --method POST \
-  --uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments" \
-  --body "{\"principalId\": \"$SP_OBJECT_ID\", \"roleDefinitionId\": \"62e90394-69f5-4237-9190-012177145e10\", \"directoryScopeId\": \"/\"}"
+az rest --method POST `
+  --uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments" `
+  --body "{`"principalId`": `"$SP_OBJECT_ID`", `"roleDefinitionId`": `"62e90394-69f5-4237-9190-012177145e10`", `"directoryScopeId`": `"/`"}"
 ```
 
 #### For Microsoft Graph API
 
 Add Microsoft Graph API permissions:
 
-```bash
+```powershell
 # Get Service Principal App ID
-APP_ID=$(az ad sp list --display-name "PurpleCloud-GitHub-Actions" --query "[0].appId" -o tsv)
+$APP_ID = az ad sp list --display-name "PurpleCloud-GitHub-Actions" --query "[0].appId" -o tsv
 
 # Add Graph API permissions
-az ad app permission add \
-  --id $APP_ID \
-  --api 00000003-0000-0000-c000-000000000000 \
-  --api-permissions \
-    1bfefb4e-e0b5-418b-a88f-73c46d2cc8e9=Role \
-    df021288-bdef-4463-88db-98f22de89214=Role \
+az ad app permission add `
+  --id $APP_ID `
+  --api 00000003-0000-0000-c000-000000000000 `
+  --api-permissions `
+    1bfefb4e-e0b5-418b-a88f-73c46d2cc8e9=Role `
+    df021288-bdef-4463-88db-98f22de89214=Role `
     62a82d76-70ea-41e2-9197-370581804d09=Role
 
 # Grant admin consent
@@ -110,11 +110,11 @@ az ad app permission admin-consent --id $APP_ID
 
 If using the Sentinel generator, add special permission for Azure AD diagnostic settings:
 
-```bash
-az role assignment create \
-  --assignee-principal-type ServicePrincipal \
-  --assignee-object-id $SP_OBJECT_ID \
-  --scope "/providers/Microsoft.aadiam" \
+```powershell
+az role assignment create `
+  --assignee-principal-type ServicePrincipal `
+  --assignee-object-id $SP_OBJECT_ID `
+  --scope "/providers/Microsoft.aadiam" `
   --role "b24988ac-6180-42a0-ab88-20f7382dd24c"
 ```
 
@@ -400,7 +400,7 @@ Based on East US pricing (December 2025):
 **Problem:** Terraform can't authenticate with Azure
 
 **Solution:**
-```bash
+```powershell
 # Verify secrets are set correctly
 # Check service principal permissions
 az login
@@ -446,7 +446,10 @@ az group delete --name <resource-group-name> --yes
 **Solution:**
 - Use your verified domain (e.g., `company.onmicrosoft.com`)
 - Or add custom domain to Azure AD first
-- Check tenant domain: `az account show --query "tenantDefaultDomain"`
+- Check tenant domain: 
+  ```powershell
+  az account show --query "tenantDefaultDomain"
+  ```
 
 ### Getting Help
 
@@ -482,7 +485,7 @@ If you encounter issues:
 
 Always verify cleanup completion:
 
-```bash
+```powershell
 # Check for remaining resources
 az group list --query "[?starts_with(name, 'PurpleCloud')]" -o table
 
@@ -510,7 +513,7 @@ Edit `.github/workflows/deploy-zero-trust-lab.yml` to:
 
 Create custom Terraform in generator directories:
 
-```bash
+```powershell
 cd generators/azure_ad
 # Edit users.tf or create custom_rbac.tf
 # Commit changes
