@@ -1,0 +1,308 @@
+name: Deploy Zero Trust Lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_type:
+        description: 'Deployment Type'
+        required: true
+        type: choice
+        options:
+          - cloud-only-basic
+          - cloud-only-full
+          - azure-ad-only
+          - managed-identity-only
+          - storage-only
+        default: 'cloud-only-full'
+      user_count:
+        description: 'Number of Azure AD users'
+        required: false
+        default: '100'
+      app_count:
+        description: 'Number of Azure AD applications'
+        required: false
+        default: '7'
+      upn_suffix:
+        description: 'UPN suffix (e.g., company.com)'
+        required: true
+      enable_privileged_roles:
+        description: 'Enable privileged role assignments (Global Admin, etc.)'
+        required: false
+        type: boolean
+        default: true
+      lab_name:
+        description: 'Lab name for resources'
+        required: false
+        default: 'ZeroTrustLab'
+      azure_location:
+        description: 'Azure region'
+        required: false
+        default: 'eastus'
+        type: choice
+        options:
+          - eastus
+          - westus
+          - centralus
+          - northeurope
+          - westeurope
+          - southeastasia
+      auto_destroy_hours:
+        description: 'Auto-destroy after hours (0 = manual)'
+        required: false
+        default: '0'
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  TF_VERSION: '1.5.0'
+  PYTHON_VERSION: '3.8'
+
+jobs:
+  deploy:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    
+    outputs:
+      deployment_id: ${{ steps.set_outputs.outputs.deployment_id }}
+      resource_groups: ${{ steps.set_outputs.outputs.resource_groups }}
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install faker
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
+      
+      - name: Generate Terraform - Azure AD
+        if: |
+          inputs.deployment_type == 'cloud-only-basic' || 
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'azure-ad-only'
+        working-directory: generators/azure_ad
+        run: |
+          PRIV_FLAGS=""
+          if [ "${{ inputs.enable_privileged_roles }}" == "true" ]; then
+            PRIV_FLAGS="-aa -pra -ga"
+          fi
+          
+          python3 azure_ad.py \
+            -c ${{ inputs.user_count }} \
+            -u ${{ inputs.upn_suffix }} \
+            --apps ${{ inputs.app_count }} \
+            --groups 4 \
+            $PRIV_FLAGS
+      
+      - name: Terraform Init - Azure AD
+        if: |
+          inputs.deployment_type == 'cloud-only-basic' || 
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'azure-ad-only'
+        working-directory: generators/azure_ad
+        run: terraform init
+      
+      - name: Terraform Plan - Azure AD
+        if: |
+          inputs.deployment_type == 'cloud-only-basic' || 
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'azure-ad-only'
+        working-directory: generators/azure_ad
+        run: terraform plan -out=azure_ad.tfplan
+      
+      - name: Terraform Apply - Azure AD
+        if: |
+          inputs.deployment_type == 'cloud-only-basic' || 
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'azure-ad-only'
+        working-directory: generators/azure_ad
+        run: terraform apply -auto-approve azure_ad.tfplan
+      
+      - name: Generate Terraform - Storage
+        if: |
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'storage-only'
+        working-directory: generators/storage
+        run: |
+          python3 storage.py \
+            -n ${{ inputs.lab_name }} \
+            -l ${{ inputs.azure_location }}
+      
+      - name: Terraform Init - Storage
+        if: |
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'storage-only'
+        working-directory: generators/storage
+        run: terraform init
+      
+      - name: Terraform Plan - Storage
+        if: |
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'storage-only'
+        working-directory: generators/storage
+        run: terraform plan -out=storage.tfplan
+      
+      - name: Terraform Apply - Storage
+        if: |
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'storage-only'
+        working-directory: generators/storage
+        run: terraform apply -auto-approve storage.tfplan
+      
+      - name: Generate Terraform - Managed Identity
+        if: |
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'managed-identity-only'
+        working-directory: generators/managed_identity
+        run: |
+          python3 managed_identity.py \
+            -u ${{ inputs.upn_suffix }} \
+            -ua owner \
+            -sa \
+            -n ${{ inputs.lab_name }} \
+            -l ${{ inputs.azure_location }}
+      
+      - name: Terraform Init - Managed Identity
+        if: |
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'managed-identity-only'
+        working-directory: generators/managed_identity
+        run: terraform init
+      
+      - name: Terraform Plan - Managed Identity
+        if: |
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'managed-identity-only'
+        working-directory: generators/managed_identity
+        run: terraform plan -out=managed_identity.tfplan
+      
+      - name: Terraform Apply - Managed Identity
+        if: |
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'managed-identity-only'
+        working-directory: generators/managed_identity
+        run: terraform apply -auto-approve managed_identity.tfplan
+      
+      - name: Capture Resource Group Names
+        id: capture_rgs
+        run: |
+          echo "Capturing created resource groups..."
+          RGS=$(az group list --query "[?starts_with(name, 'PurpleCloud') || contains(name, '${{ inputs.lab_name }}')].name" -o tsv | tr '\n' ',' | sed 's/,$//')
+          echo "resource_groups=$RGS" >> $GITHUB_OUTPUT
+          echo "Found resource groups: $RGS"
+      
+      - name: Save Terraform State
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-state-${{ github.run_number }}
+          path: |
+            generators/**/terraform.tfstate
+            generators/**/terraform.tfstate.backup
+            generators/**/*.tf
+            generators/**/.terraform.lock.hcl
+          retention-days: 30
+      
+      - name: Set Outputs
+        id: set_outputs
+        run: |
+          DEPLOYMENT_ID="deployment-${{ github.run_number }}-$(date +%s)"
+          echo "deployment_id=$DEPLOYMENT_ID" >> $GITHUB_OUTPUT
+          echo "resource_groups=${{ steps.capture_rgs.outputs.resource_groups }}" >> $GITHUB_OUTPUT
+      
+      - name: Generate Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment Type**: ${{ inputs.deployment_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **UPN Suffix**: ${{ inputs.upn_suffix }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lab Name**: ${{ inputs.lab_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Azure Location**: ${{ inputs.azure_location }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Users Created**: ${{ inputs.user_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Apps Created**: ${{ inputs.app_count }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Privileged Roles**: ${{ inputs.enable_privileged_roles }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Resources" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment ID**: ${{ steps.set_outputs.outputs.deployment_id }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Resource Groups**: ${{ steps.capture_rgs.outputs.resource_groups }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Review deployed resources in Azure Portal" >> $GITHUB_STEP_SUMMARY
+          echo "2. Run your Zero Trust audit scripts" >> $GITHUB_STEP_SUMMARY
+          echo "3. Clean up using the 'Cleanup Zero Trust Lab' workflow when done" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ inputs.auto_destroy_hours }}" != "0" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "⏰ **Auto-destroy scheduled in ${{ inputs.auto_destroy_hours }} hours**" >> $GITHUB_STEP_SUMMARY
+          fi
+      
+      - name: Post Deployment Outputs
+        run: |
+          echo "=================================="
+          echo "Deployment Complete!"
+          echo "=================================="
+          echo "Deployment ID: ${{ steps.set_outputs.outputs.deployment_id }}"
+          echo "Resource Groups: ${{ steps.capture_rgs.outputs.resource_groups }}"
+          echo ""
+          echo "Access your resources at:"
+          echo "https://portal.azure.com/#blade/HubsExtension/BrowseResourceGroups"
+  
+  schedule-cleanup:
+    name: Schedule Auto-Cleanup
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: inputs.auto_destroy_hours != '0'
+    
+    steps:
+      - name: Wait for scheduled cleanup time
+        run: |
+          SECONDS=$((60 * 60 * ${{ inputs.auto_destroy_hours }}))
+          echo "Waiting ${{ inputs.auto_destroy_hours }} hours before triggering cleanup..."
+          sleep $SECONDS
+      
+      - name: Trigger Cleanup Workflow
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: 'cleanup-resources.yml',
+              ref: 'main',
+              inputs: {
+                deployment_type: '${{ inputs.deployment_type }}',
+                confirm_destroy: 'AUTO-DESTROY',
+                delete_state: 'true',
+                deployment_id: '${{ needs.deploy.outputs.deployment_id }}'
+              }
+            });
+            
+            console.log('Cleanup workflow triggered after ${{ inputs.auto_destroy_hours }} hours');

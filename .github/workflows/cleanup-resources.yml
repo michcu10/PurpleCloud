@@ -1,0 +1,346 @@
+name: Cleanup Zero Trust Lab
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment_type:
+        description: 'Deployment type to cleanup'
+        required: true
+        type: choice
+        options:
+          - all
+          - cloud-only-basic
+          - cloud-only-full
+          - azure-ad-only
+          - managed-identity-only
+          - storage-only
+        default: 'all'
+      confirm_destroy:
+        description: 'Type "DESTROY" to confirm deletion'
+        required: true
+      delete_state:
+        description: 'Delete Terraform state files'
+        type: boolean
+        default: false
+      cleanup_orphaned:
+        description: 'Clean up orphaned resource groups'
+        type: boolean
+        default: true
+      deployment_id:
+        description: 'Specific deployment ID (optional)'
+        required: false
+
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  TF_VERSION: '1.5.0'
+
+jobs:
+  validate:
+    name: Validate Destroy Request
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Check confirmation
+        run: |
+          if [ "${{ inputs.confirm_destroy }}" != "DESTROY" ] && [ "${{ inputs.confirm_destroy }}" != "AUTO-DESTROY" ]; then
+            echo "::error::❌ Confirmation failed. You must type 'DESTROY' to proceed."
+            echo "::error::You entered: ${{ inputs.confirm_destroy }}"
+            exit 1
+          fi
+          echo "✅ Destroy confirmation validated"
+      
+      - name: Display Warning
+        run: |
+          echo "⚠️  WARNING: This will destroy Azure resources!"
+          echo "Deployment Type: ${{ inputs.deployment_type }}"
+          echo "Delete State: ${{ inputs.delete_state }}"
+          echo "Cleanup Orphaned: ${{ inputs.cleanup_orphaned }}"
+  
+  cleanup-azure-ad:
+    name: Destroy Azure AD Resources
+    runs-on: ubuntu-latest
+    needs: validate
+    if: |
+      inputs.deployment_type == 'all' || 
+      inputs.deployment_type == 'cloud-only-basic' || 
+      inputs.deployment_type == 'cloud-only-full' || 
+      inputs.deployment_type == 'azure-ad-only'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
+      
+      - name: Download Terraform State
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: terraform-state-*
+          path: generators/
+          merge-multiple: true
+      
+      - name: Destroy Azure AD Resources
+        working-directory: generators/azure_ad
+        continue-on-error: true
+        run: |
+          if [ -f "terraform.tfstate" ] || [ -f "users.tf" ]; then
+            echo "🗑️  Destroying Azure AD resources..."
+            terraform init
+            terraform destroy -auto-approve || echo "::warning::Some resources may have already been deleted"
+            echo "✅ Azure AD cleanup complete"
+          else
+            echo "ℹ️  No Azure AD state found, skipping..."
+          fi
+  
+  cleanup-storage:
+    name: Destroy Storage Resources
+    runs-on: ubuntu-latest
+    needs: validate
+    if: |
+      inputs.deployment_type == 'all' || 
+      inputs.deployment_type == 'cloud-only-full' || 
+      inputs.deployment_type == 'storage-only'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
+      
+      - name: Download Terraform State
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: terraform-state-*
+          path: generators/
+          merge-multiple: true
+      
+      - name: Destroy Storage Resources
+        working-directory: generators/storage
+        continue-on-error: true
+        run: |
+          if [ -f "terraform.tfstate" ] || [ -f "storage.tf" ]; then
+            echo "🗑️  Destroying Storage resources..."
+            terraform init
+            terraform destroy -auto-approve || echo "::warning::Some resources may have already been deleted"
+            echo "✅ Storage cleanup complete"
+          else
+            echo "ℹ️  No Storage state found, skipping..."
+          fi
+  
+  cleanup-managed-identity:
+    name: Destroy Managed Identity Resources
+    runs-on: ubuntu-latest
+    needs: validate
+    if: |
+      inputs.deployment_type == 'all' || 
+      inputs.deployment_type == 'cloud-only-full' || 
+      inputs.deployment_type == 'managed-identity-only'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+      
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
+      
+      - name: Download Terraform State
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          pattern: terraform-state-*
+          path: generators/
+          merge-multiple: true
+      
+      - name: Destroy Managed Identity Resources
+        working-directory: generators/managed_identity
+        continue-on-error: true
+        run: |
+          if [ -f "terraform.tfstate" ] || [ -f "managed_identity.tf" ]; then
+            echo "🗑️  Destroying Managed Identity resources..."
+            terraform init
+            terraform destroy -auto-approve || echo "::warning::Some resources may have already been deleted"
+            echo "✅ Managed Identity cleanup complete"
+          else
+            echo "ℹ️  No Managed Identity state found, skipping..."
+          fi
+  
+  cleanup-orphaned-resources:
+    name: Clean Orphaned Azure Resources
+    runs-on: ubuntu-latest
+    needs: [cleanup-azure-ad, cleanup-storage, cleanup-managed-identity]
+    if: inputs.cleanup_orphaned
+    
+    steps:
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
+      
+      - name: Find Orphaned Resource Groups
+        id: find_orphans
+        run: |
+          echo "🔍 Searching for orphaned PurpleCloud resource groups..."
+          
+          ORPHANED_RGS=$(az group list \
+            --query "[?starts_with(name, 'PurpleCloud') || contains(name, 'ZeroTrust')].name" \
+            -o tsv)
+          
+          if [ -z "$ORPHANED_RGS" ]; then
+            echo "✅ No orphaned resource groups found"
+            echo "has_orphans=false" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️  Found orphaned resource groups:"
+            echo "$ORPHANED_RGS"
+            echo "orphaned_rgs<<EOF" >> $GITHUB_OUTPUT
+            echo "$ORPHANED_RGS" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "has_orphans=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Delete Orphaned Resource Groups
+        if: steps.find_orphans.outputs.has_orphans == 'true'
+        run: |
+          echo "🗑️  Deleting orphaned resource groups..."
+          echo "${{ steps.find_orphans.outputs.orphaned_rgs }}" | while read rg; do
+            if [ -n "$rg" ]; then
+              echo "Deleting: $rg"
+              az group delete --name "$rg" --yes --no-wait || echo "::warning::Failed to delete $rg"
+            fi
+          done
+          echo "✅ Orphaned resource group deletion initiated (async)"
+      
+      - name: Verify Cleanup
+        run: |
+          sleep 10
+          REMAINING=$(az group list \
+            --query "[?starts_with(name, 'PurpleCloud') || contains(name, 'ZeroTrust')].name" \
+            -o tsv | wc -l)
+          
+          if [ "$REMAINING" -eq 0 ]; then
+            echo "✅ All PurpleCloud resource groups cleaned up"
+          else
+            echo "⚠️  Some resource groups may still be deleting (async operation)"
+            az group list \
+              --query "[?starts_with(name, 'PurpleCloud') || contains(name, 'ZeroTrust')].[name,properties.provisioningState]" \
+              -o table
+          fi
+  
+  cleanup-state:
+    name: Delete Terraform State Files
+    runs-on: ubuntu-latest
+    needs: cleanup-orphaned-resources
+    if: inputs.delete_state
+    
+    steps:
+      - name: Delete Terraform State Artifacts
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const artifacts = await github.rest.actions.listArtifactsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            
+            let deleted = 0;
+            for (const artifact of artifacts.data.artifacts) {
+              if (artifact.name.startsWith('terraform-state-')) {
+                console.log(`Deleting artifact: ${artifact.name}`);
+                await github.rest.actions.deleteArtifact({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  artifact_id: artifact.id,
+                });
+                deleted++;
+              }
+            }
+            
+            console.log(`✅ Deleted ${deleted} Terraform state artifacts`);
+  
+  summary:
+    name: Cleanup Summary
+    runs-on: ubuntu-latest
+    needs: [cleanup-azure-ad, cleanup-storage, cleanup-managed-identity, cleanup-orphaned-resources, cleanup-state]
+    if: always()
+    
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## 🧹 Cleanup Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment Type**: ${{ inputs.deployment_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Delete State**: ${{ inputs.delete_state }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Cleanup Orphaned**: ${{ inputs.cleanup_orphaned }}" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -n "${{ inputs.deployment_id }}" ]; then
+            echo "- **Deployment ID**: ${{ inputs.deployment_id }}" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Jobs Status" >> $GITHUB_STEP_SUMMARY
+          echo "- Azure AD Cleanup: ${{ needs.cleanup-azure-ad.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Storage Cleanup: ${{ needs.cleanup-storage.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Managed Identity Cleanup: ${{ needs.cleanup-managed-identity.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Orphaned Resources Cleanup: ${{ needs.cleanup-orphaned-resources.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "- State Deletion: ${{ needs.cleanup-state.result }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Cleanup Complete" >> $GITHUB_STEP_SUMMARY
+          echo "All specified resources have been destroyed." >> $GITHUB_STEP_SUMMARY

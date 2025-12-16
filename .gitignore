@@ -1,22 +1,56 @@
+# Environment files and secrets
 .env*
+*.pem
+ssh_key.pem
+
+# IDE
 .idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Terraform files
 *.tf
-ranges.log
+*.tfplan
+*.tfstate
+*.tfstate.*
 terraform.tfstate*
+.terraform/
+.terraform
+.terraform.lock.hcl
+.terraform.tfstate.lock.info
+
+# Generated files
+ranges.log
 ad_users.csv
 azure_users.csv
 azure_emails.txt
 azure_usernames.txt
+*.cfg
 files/win10/*.cfg
 files/velocihelk/host-velocihelk.cfg
 files/velocihelk/server.config.yaml
 files/velocihelk/client.config.yaml
 files/velocihelk/winlogbeat.yaml
+
+# Output directories
 output/*
 site/*
-.terraform
-ssh_key.pem
-*.cfg
+
+# MkDocs
 mkdocs-material/
-.terraform.lock.hcl
-.terraform.tfstate.lock.info
+
+# OS specific
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+*.log.*
+
+# Backup files
+*.backup
+*.bak
+*.old
