@@ -58,6 +58,8 @@ env:
   ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   TF_VERSION: '1.5.0'
   PYTHON_VERSION: '3.8'
+  TF_LOG: INFO
+  TF_PLUGIN_CACHE_DIR: ${{ github.workspace }}/.terraform.d/plugin-cache
 
 jobs:
   deploy:
@@ -89,6 +91,10 @@ jobs:
         with:
           terraform_version: ${{ env.TF_VERSION }}
           terraform_wrapper: false
+      
+      - name: Prepare Terraform plugin cache
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
       
       - name: Azure Login
         uses: azure/login@v1
@@ -134,7 +140,7 @@ jobs:
           inputs.deployment_type == 'cloud-only-full' || 
           inputs.deployment_type == 'azure-ad-only'
         working-directory: generators/azure_ad
-        run: terraform plan -out=azure_ad.tfplan
+        run: terraform plan -input=false -no-color -out=azure_ad.tfplan
       
       - name: Terraform Apply - Azure AD
         if: |
@@ -142,7 +148,7 @@ jobs:
           inputs.deployment_type == 'cloud-only-full' || 
           inputs.deployment_type == 'azure-ad-only'
         working-directory: generators/azure_ad
-        run: terraform apply -auto-approve -parallelism=1 azure_ad.tfplan
+        run: terraform apply -auto-approve -parallelism=1 -input=false -lock-timeout=20m -no-color azure_ad.tfplan
       
       - name: Generate Terraform - Storage
         if: |

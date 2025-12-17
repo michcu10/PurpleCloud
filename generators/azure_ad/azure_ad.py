@@ -265,6 +265,10 @@ terraform {
             source  = "hashicorp/random"
             version = "~> 3.6"
         }
+        time = {
+            source  = "hashicorp/time"
+            version = "~> 0.11"
+        }
     }
 }
 
@@ -410,6 +414,16 @@ resource "azuread_application" "LINE1" {
 '''
     return buffer
 
+def fetch_wait_template():
+    buffer = '''
+# Small delay to allow AAD replication for SP creation
+resource "time_sleep" "wait_LINE1" {
+  create_duration = "45s"
+  depends_on      = [azuread_application.LINE2]
+}
+'''
+    return buffer
+
 
 def fetch_sp_template():
     buffer = '''
@@ -417,7 +431,7 @@ def fetch_sp_template():
 resource "azuread_service_principal" "LINE3" {
   client_id = azuread_application.LINE4.client_id
 
-    depends_on = [azuread_application.LINE5]
+    depends_on = [time_sleep.wait_LINE5]
 
     timeouts {
         create = "30m"
@@ -464,8 +478,8 @@ resource "azuread_group" "LINE1" {
   ]
 
     timeouts {
-        create = "30m"
-        update = "30m"
+        create = "45m"
+        update = "45m"
     }
 }
 '''
@@ -483,6 +497,7 @@ if apps > 0:
         for key in azure_ad_applications[index]:
             # fetch an app template
             app_template = fetch_app_template()
+            wait_template = fetch_wait_template()
 
             # get the app name
             app_name = key
@@ -499,6 +514,11 @@ if apps > 0:
             # write the new app str
             n = azure_ad_apps_file.write(new_app_str)
 
+            # insert a small wait after app creation to allow replication
+            new_wait_str = wait_template.replace("LINE1", app_name)
+            new_wait_str = new_wait_str.replace("LINE2", app_name)
+            n = azure_ad_apps_file.write(new_wait_str)
+
             # Check if a Service Principal is desired for each application
             if create_sp:
                 # This is true, so create a sp for the associated app
@@ -512,7 +532,7 @@ if apps > 0:
                 # replace line4 with app_name
                 new_sp_str = new_sp_str.replace("LINE4",app_name)
 
-                # replace line5 with app_name
+                # replace line5 with app_name for wait dependency
                 new_sp_str = new_sp_str.replace("LINE5",app_name)
 
                 # write the new sp str
