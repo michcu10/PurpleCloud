@@ -327,10 +327,21 @@ resource "azuread_directory_role" "application_admin" {
   display_name = "Application administrator"
 }
 
+# Wait for directory role activation to replicate
+resource "time_sleep" "wait_application_admin_role" {
+  create_duration = "30s"
+  depends_on      = [azuread_directory_role.application_admin]
+}
+
 # Assign Application administrator to a random user
 resource "azuread_directory_role_assignment" "assign_application_admin" {
-  role_id   = azuread_directory_role.application_admin.object_id
+  role_id             = azuread_directory_role.application_admin.object_id
   principal_object_id = azuread_user.userAPP_ADMIN_USER_NUM.object_id
+  
+  depends_on = [
+    time_sleep.wait_application_admin_role,
+    azuread_user.userAPP_ADMIN_USER_NUM
+  ]
 }
 '''
 
@@ -447,10 +458,21 @@ resource "azuread_directory_role" "pra" {
   display_name = "Privileged role administrator"
 }
 
+# Wait for directory role activation to replicate
+resource "time_sleep" "wait_pra_role" {
+  create_duration = "30s"
+  depends_on      = [azuread_directory_role.pra]
+}
+
 # Assign PRA to a random SP
 resource "azuread_directory_role_assignment" "assign_pra" {
-  role_id   = azuread_directory_role.pra.object_id
+  role_id             = azuread_directory_role.pra.object_id
   principal_object_id = azuread_service_principal.SP_APPLICATION_NAME.object_id
+  
+  depends_on = [
+    time_sleep.wait_pra_role,
+    azuread_service_principal.SP_APPLICATION_NAME
+  ]
 }
 '''
 
@@ -460,10 +482,21 @@ resource "azuread_directory_role" "ga" {
   display_name = "Global administrator"
 }
 
+# Wait for directory role activation to replicate
+resource "time_sleep" "wait_ga_role" {
+  create_duration = "30s"
+  depends_on      = [azuread_directory_role.ga]
+}
+
 # Assign GA to a random SP
 resource "azuread_directory_role_assignment" "assign_ga" {
-  role_id   = azuread_directory_role.ga.object_id
+  role_id             = azuread_directory_role.ga.object_id
   principal_object_id = azuread_service_principal.SP_APPLICATION_NAME.object_id
+  
+  depends_on = [
+    time_sleep.wait_ga_role,
+    azuread_service_principal.SP_APPLICATION_NAME
+  ]
 }
 '''
 
@@ -477,9 +510,15 @@ resource "azuread_group" "LINE1" {
     LINE3
   ]
 
+    lifecycle {
+        ignore_changes = [owners]
+    }
+
     timeouts {
-        create = "45m"
-        update = "45m"
+        create = "60m"
+        update = "60m"
+        read   = "5m"
+        delete = "60m"
     }
 }
 '''

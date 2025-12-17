@@ -148,7 +148,30 @@ jobs:
           inputs.deployment_type == 'cloud-only-full' || 
           inputs.deployment_type == 'azure-ad-only'
         working-directory: generators/azure_ad
-        run: terraform apply -auto-approve -parallelism=1 -input=false -lock-timeout=20m -no-color azure_ad.tfplan
+        run: |
+          # Apply with retries to handle transient Azure AD issues
+          MAX_RETRIES=3
+          RETRY_COUNT=0
+          
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Attempt $((RETRY_COUNT + 1)) of $MAX_RETRIES..."
+            
+            if terraform apply -auto-approve -parallelism=1 -input=false -lock-timeout=30m -no-color azure_ad.tfplan; then
+              echo "Terraform apply succeeded!"
+              exit 0
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+                echo "Apply failed. Waiting 60 seconds before retry..."
+                sleep 60
+                # Refresh the plan for retry
+                terraform plan -input=false -no-color -out=azure_ad.tfplan
+              else
+                echo "All retry attempts exhausted."
+                exit 1
+              fi
+            fi
+          done
       
       - name: Generate Terraform - Storage
         if: |
