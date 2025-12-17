@@ -255,37 +255,47 @@ with open(emails_txt, 'w') as f:
 
 ### Now write out proper terraform
 terraform_users_template = '''
-# Configure the Microsoft Azure Active Directory Provider
-provider "azuread" {
-
+terraform {
+    required_providers {
+        azuread = {
+            source  = "hashicorp/azuread"
+            version = "~> 2.55"
+        }
+        random = {
+            source  = "hashicorp/random"
+            version = "~> 3.6"
+        }
+    }
 }
+
+# Configure the Microsoft Azure Active Directory Provider
+provider "azuread" {}
 
 ### Note:  This upn_suffix must match the tenant username with *.onmicrosoft.com, or the custom domain that has been added
 ### This is the domain for all new Azure AD users
 variable "upn_suffix" {
-  default = "REPLACE_CUSTOM_STRING"
+    default = "REPLACE_CUSTOM_STRING"
 }
 
 # Random Pet for Azure AD users (First part of password)
 resource "random_pet" "rp_string" {
-  length = 2
+    length = 2
 }
 
 # Random String for Azure AD users (Second part of password)
 resource "random_string" "my_password" {
-  length  = 4
-  special = false
-  upper   = true
+    length  = 4
+    special = false
+    upper   = true
 }
 
 locals {
-  creds = "${random_pet.rp_string.id}-${random_string.my_password
-.id}"
+    creds = "${random_pet.rp_string.id}-${random_string.my_password.id}"
 }
 
 output "azure_ad_details" {
 
-  value = <<EOS
+    value = <<EOS
 
 ------------------------------------
 Azure AD Security Lab Setup Complete
@@ -387,6 +397,15 @@ def fetch_app_template():
 # Create application
 resource "azuread_application" "LINE1" {
   display_name = "LINE2"
+
+    lifecycle {
+        ignore_changes = [owners]
+    }
+
+    timeouts {
+        create = "30m"
+        update = "30m"
+    }
 }
 '''
     return buffer
@@ -398,7 +417,12 @@ def fetch_sp_template():
 resource "azuread_service_principal" "LINE3" {
   client_id = azuread_application.LINE4.client_id
 
- depends_on = [azuread_application.LINE5]
+    depends_on = [azuread_application.LINE5]
+
+    timeouts {
+        create = "30m"
+        update = "30m"
+    }
 }
 '''
     return buffer
@@ -438,6 +462,11 @@ resource "azuread_group" "LINE1" {
   members = [
     LINE3
   ]
+
+    timeouts {
+        create = "30m"
+        update = "30m"
+    }
 }
 '''
     return buffer

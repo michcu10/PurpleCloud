@@ -142,7 +142,7 @@ jobs:
           inputs.deployment_type == 'cloud-only-full' || 
           inputs.deployment_type == 'azure-ad-only'
         working-directory: generators/azure_ad
-        run: terraform apply -auto-approve azure_ad.tfplan
+        run: terraform apply -auto-approve -parallelism=1 azure_ad.tfplan
       
       - name: Generate Terraform - Storage
         if: |

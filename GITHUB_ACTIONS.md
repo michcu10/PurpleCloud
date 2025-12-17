@@ -73,11 +73,21 @@ Assign additional permissions for Azure AD:
 # Get the Service Principal Object ID
 $SP_OBJECT_ID = az ad sp list --display-name "PurpleCloud-GitHub-Actions" --query "[0].id" -o tsv
 
-# Assign Global Administrator role (required for Azure AD user/app creation)
+# Check if Global Administrator role is already assigned (to avoid conflicts)
+$existingRole = az rest --method GET `
+  --uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=principalId eq '$SP_OBJECT_ID' and roleDefinitionId eq '62e90394-69f5-4237-9190-012177145e10'" `
+  --query "value[0].id" -o tsv
+
+# Assign Global Administrator role if not already assigned
 # Note: You must be a Global Administrator to run this
-az rest --method POST `
-  --uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments" `
-  --body "{`"principalId`": `"$SP_OBJECT_ID`", `"roleDefinitionId`": `"62e90394-69f5-4237-9190-012177145e10`", `"directoryScopeId`": `"/`"}"
+if ([string]::IsNullOrEmpty($existingRole)) {
+  az rest --method POST `
+    --uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments" `
+    --body "{`"principalId`": `"$SP_OBJECT_ID`", `"roleDefinitionId`": `"62e90394-69f5-4237-9190-012177145e10`", `"directoryScopeId`": `"/`"}"
+  Write-Host "Global Administrator role assigned successfully"
+} else {
+  Write-Host "Global Administrator role already assigned - skipping"
+}
 ```
 
 #### For Microsoft Graph API
@@ -88,7 +98,7 @@ Add Microsoft Graph API permissions:
 # Get Service Principal App ID
 $APP_ID = az ad sp list --display-name "PurpleCloud-GitHub-Actions" --query "[0].appId" -o tsv
 
-# Add Graph API permissions
+# Add Graph API permissions (idempotent - safe to run multiple times)
 az ad app permission add `
   --id $APP_ID `
   --api 00000003-0000-0000-c000-000000000000 `
@@ -97,7 +107,16 @@ az ad app permission add `
     df021288-bdef-4463-88db-98f22de89214=Role `
     62a82d76-70ea-41e2-9197-370581804d09=Role
 
-# Grant admin consent
+# Grant the permissions (required for delegated permissions)
+az ad app permission grant `
+  --id $APP_ID `
+  --api 00000003-0000-0000-c000-000000000000 `
+  --scope "Application.ReadWrite.All User.ReadWrite.All Group.ReadWrite.All"
+
+# Grant admin consent (requires Global Administrator)
+# Note: If running in Cloud Shell, you may need to login interactively first:
+# az logout
+# az login --use-device-code --tenant "YOUR_TENANT_ID"
 az ad app permission admin-consent --id $APP_ID
 ```
 
@@ -441,15 +460,26 @@ az group delete --name <resource-group-name> --yes
 
 #### 5. "Workflow Fails on User Creation"
 
-**Problem:** UPN suffix doesn't match tenant
+**Problem:** UPN suffix doesn't match tenant or domain is not verified
+
+**Error message:**
+```
+The domain portion of the userPrincipalName property is invalid. 
+You must use one of the verified domain names in your organization.
+```
 
 **Solution:**
-- Use your verified domain (e.g., `company.onmicrosoft.com`)
-- Or add custom domain to Azure AD first
-- Check tenant domain: 
+- **Use your tenant's default `.onmicrosoft.com` domain** (always verified and available)
+- Find your tenant domain:
   ```powershell
-  az account show --query "tenantDefaultDomain"
+  az account show --query "tenantDefaultDomain" -o tsv
   ```
+- List all verified domains:
+  ```powershell
+  az rest --method GET --uri "https://graph.microsoft.com/v1.0/domains" --query "value[?isVerified].id" -o tsv
+  ```
+- **Do NOT use:** fake domains like `test.lab`, `example.com`, or `contoso.com` unless they're verified in your tenant
+- Or add and verify a custom domain in Azure AD before running the workflow
 
 ### Getting Help
 
