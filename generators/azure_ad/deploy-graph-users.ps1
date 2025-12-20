@@ -88,6 +88,7 @@ $results = $users | ForEach-Object -Parallel {
             forceChangePasswordNextSignIn = $false
             password                      = $pass
         }
+        jobTitle          = "PurpleCloud-Managed"
     } | ConvertTo-Json -Depth 2 -Compress
 
     $uri = "https://graph.microsoft.com/v1.0/users"

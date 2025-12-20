@@ -529,6 +529,7 @@ resource "azurerm_storage_blob" "mi_cc1_csv" {
   storage_container_name = azurerm_storage_container.mi_container1.name
   type                   = "Block"
   source                 = "${path.module}/data/cc.csv"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 
 resource "azurerm_storage_blob" "mi_cc2_csv" {
@@ -537,6 +538,7 @@ resource "azurerm_storage_blob" "mi_cc2_csv" {
   storage_container_name = azurerm_storage_container.mi_container2.name
   type                   = "Block"
   source                 = "${path.module}/data/cc.csv"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 
 resource "azurerm_storage_blob" "mi_cc3_csv" {
@@ -545,6 +547,7 @@ resource "azurerm_storage_blob" "mi_cc3_csv" {
   storage_container_name = azurerm_storage_container.mi_container3.name
   type                   = "Block"
   source                 = "${path.module}/data/cc.csv"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 
 # Load customers.csv data in all three containers
@@ -554,6 +557,7 @@ resource "azurerm_storage_blob" "mi_customer1_csv" {
   storage_container_name = azurerm_storage_container.mi_container1.name
   type                   = "Block"
   source                 = "${path.module}/data/customers.csv"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 
 resource "azurerm_storage_blob" "mi_customer2_csv" {
@@ -562,6 +566,7 @@ resource "azurerm_storage_blob" "mi_customer2_csv" {
   storage_container_name = azurerm_storage_container.mi_container2.name
   type                   = "Block"
   source                 = "${path.module}/data/customers.csv"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 
 resource "azurerm_storage_blob" "mi_customer3_csv" {
@@ -570,6 +575,7 @@ resource "azurerm_storage_blob" "mi_customer3_csv" {
   storage_container_name = azurerm_storage_container.mi_container3.name
   type                   = "Block"
   source                 = "${path.module}/data/customers.csv"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 
 # Load finance.xlsx data in all three containers
@@ -579,6 +585,7 @@ resource "azurerm_storage_blob" "mi_finance1_xlsx" {
   storage_container_name = azurerm_storage_container.mi_container1.name
   type                   = "Block"
   source                 = "${path.module}/data/finance.xlsx"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 resource "azurerm_storage_blob" "mi_finance2_xlsx" {
   name                   = var.mi_finance_xlsx
@@ -586,6 +593,7 @@ resource "azurerm_storage_blob" "mi_finance2_xlsx" {
   storage_container_name = azurerm_storage_container.mi_container2.name
   type                   = "Block"
   source                 = "${path.module}/data/finance.xlsx"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 resource "azurerm_storage_blob" "mi_finance3_xlsx" {
   name                   = var.mi_finance_xlsx
@@ -593,6 +601,7 @@ resource "azurerm_storage_blob" "mi_finance3_xlsx" {
   storage_container_name = azurerm_storage_container.mi_container3.name
   type                   = "Block"
   source                 = "${path.module}/data/finance.xlsx"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 
 # Load hr.xlsx data in all three containers
@@ -602,6 +611,7 @@ resource "azurerm_storage_blob" "mi_hr1_xlsx" {
   storage_container_name = azurerm_storage_container.mi_container1.name
   type                   = "Block"
   source                 = "${path.module}/data/hr.xlsx"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 resource "azurerm_storage_blob" "mi_hr2_xlsx" {
   name                   = var.mi_hr_xlsx
@@ -609,6 +619,7 @@ resource "azurerm_storage_blob" "mi_hr2_xlsx" {
   storage_container_name = azurerm_storage_container.mi_container2.name
   type                   = "Block"
   source                 = "${path.module}/data/hr.xlsx"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 resource "azurerm_storage_blob" "mi_hr3_xlsx" {
   name                   = var.mi_hr_xlsx
@@ -616,6 +627,7 @@ resource "azurerm_storage_blob" "mi_hr3_xlsx" {
   storage_container_name = azurerm_storage_container.mi_container3.name
   type                   = "Block"
   source                 = "${path.module}/data/hr.xlsx"
+  depends_on             = [azurerm_role_assignment.mi_storage_contributor]
 }
 
 

@@ -262,18 +262,13 @@ function Remove-AzureADResources {
     Set-Location $generatorPath
     
     if ($DeploymentMethod -eq "GraphAPI" -or (Test-Path "azure_users.csv")) {
-        if (Test-Path "azure_users.csv") {
-            Write-Step "Cleaning up users via Graph API (detected azure_users.csv)..."
-            $graphCmd = "pwsh .\cleanup-graph-users.ps1 -CsvFile `"azure_users.csv`""
-            if ($DryRun) { $graphCmd += " -DryRun" }
-            
-            Write-ColorOutput "  Command: $graphCmd" -Color "Cyan"
-            Invoke-Expression $graphCmd
-            Write-Success "Graph API cleanup completed"
-        }
-        elseif ($DeploymentMethod -eq "GraphAPI") {
-            Write-Warning "DeploymentMethod set to GraphAPI but azure_users.csv not found at: $(Get-Location)"
-        }
+        Write-Step "Cleaning up users via Graph API (Tagged)..."
+        $graphCmd = "pwsh .\cleanup-graph-users.ps1 -CleanupAllTagged"
+        if ($DryRun) { $graphCmd += " -DryRun" }
+        
+        Write-ColorOutput "  Command: $graphCmd" -Color "Cyan"
+        Invoke-Expression $graphCmd
+        Write-Success "Graph API cleanup completed"
     }
 
     if ((Test-Path "terraform.tfstate") -or (Test-Path "users.tf")) {

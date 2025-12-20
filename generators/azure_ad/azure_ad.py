@@ -336,6 +336,7 @@ resource "azuread_user" "LINE1" {
   display_name        = "LINE3"
   mail_nickname       = "LINE4"
   password            = local.creds
+  job_title           = "PurpleCloud-Managed"
 }
 '''
 
@@ -430,6 +431,7 @@ def fetch_app_template():
 # Create application
 resource "azuread_application" "LINE1" {
   display_name = "LINE2"
+  tags         = ["PurpleCloud"]
 
     lifecycle {
         ignore_changes = [owners]
@@ -459,6 +461,7 @@ def fetch_sp_template():
 # Create service principal 
 resource "azuread_service_principal" "LINE3" {
   client_id = azuread_application.LINE4.client_id
+  tags      = ["PurpleCloud"]
 
     depends_on = [time_sleep.wait_LINE5]
 
@@ -522,7 +525,8 @@ def fetch_group_template():
     buffer = '''
 # Azure AD Group
 resource "azuread_group" "LINE1" {
-  display_name = "LINE2"
+  display_name     = "LINE2"
+  description      = "Managed by PurpleCloud"
   security_enabled = true
   members = [
     LINE3
