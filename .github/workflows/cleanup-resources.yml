@@ -103,12 +103,20 @@ jobs:
         continue-on-error: true
         run: |
           if [ -f "terraform.tfstate" ] || [ -f "users.tf" ]; then
-            echo "🗑️  Destroying Azure AD resources..."
+            echo "🗑️  Destroying Azure AD resources via Terraform..."
             terraform init
             terraform destroy -auto-approve || echo "::warning::Some resources may have already been deleted"
-            echo "✅ Azure AD cleanup complete"
+            echo "✅ Azure AD Terraform cleanup complete"
           else
-            echo "ℹ️  No Azure AD state found, skipping..."
+            echo "ℹ️  No Azure AD Terraform state found."
+          fi
+          
+          if [ -f "azure_users.csv" ]; then
+            echo "🗑️  Cleaning up Graph API users..."
+            pwsh ./cleanup-graph-users.ps1 -CsvFile "./azure_users.csv"
+            echo "✅ Graph API user cleanup complete"
+          else
+            echo "ℹ️  No azure_users.csv found, skipping Graph cleanup."
           fi
   
   cleanup-storage:

@@ -30,6 +30,14 @@ on:
         required: false
         type: boolean
         default: true
+      deployment_method:
+        description: 'Azure AD Deployment Method'
+        required: false
+        type: choice
+        options:
+          - Terraform
+          - GraphAPI
+        default: 'Terraform'
       lab_name:
         description: 'Lab name for resources'
         required: false
@@ -107,7 +115,7 @@ jobs:
               "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
             }
       
-      - name: Generate Terraform - Azure AD
+      - name: Generate Azure AD Configuration
         if: |
           inputs.deployment_type == 'cloud-only-basic' || 
           inputs.deployment_type == 'cloud-only-full' || 
@@ -128,25 +136,28 @@ jobs:
       
       - name: Terraform Init - Azure AD
         if: |
-          inputs.deployment_type == 'cloud-only-basic' || 
-          inputs.deployment_type == 'cloud-only-full' || 
-          inputs.deployment_type == 'azure-ad-only'
+          (inputs.deployment_type == 'cloud-only-basic' || 
+           inputs.deployment_type == 'cloud-only-full' || 
+           inputs.deployment_type == 'azure-ad-only') &&
+          inputs.deployment_method == 'Terraform'
         working-directory: generators/azure_ad
         run: terraform init
       
       - name: Terraform Plan - Azure AD
         if: |
-          inputs.deployment_type == 'cloud-only-basic' || 
-          inputs.deployment_type == 'cloud-only-full' || 
-          inputs.deployment_type == 'azure-ad-only'
+          (inputs.deployment_type == 'cloud-only-basic' || 
+           inputs.deployment_type == 'cloud-only-full' || 
+           inputs.deployment_type == 'azure-ad-only') &&
+          inputs.deployment_method == 'Terraform'
         working-directory: generators/azure_ad
         run: terraform plan -input=false -no-color -out=azure_ad.tfplan
       
       - name: Terraform Apply - Azure AD
         if: |
-          inputs.deployment_type == 'cloud-only-basic' || 
-          inputs.deployment_type == 'cloud-only-full' || 
-          inputs.deployment_type == 'azure-ad-only'
+          (inputs.deployment_type == 'cloud-only-basic' || 
+           inputs.deployment_type == 'cloud-only-full' || 
+           inputs.deployment_type == 'azure-ad-only') &&
+          inputs.deployment_method == 'Terraform'
         working-directory: generators/azure_ad
         run: |
           # Apply with retries to handle transient Azure AD issues
@@ -172,6 +183,19 @@ jobs:
               fi
             fi
           done
+
+      - name: Graph API Deployment - Azure AD
+        if: |
+          (inputs.deployment_type == 'cloud-only-basic' || 
+           inputs.deployment_type == 'cloud-only-full' || 
+           inputs.deployment_type == 'azure-ad-only') &&
+          inputs.deployment_method == 'GraphAPI'
+        working-directory: generators/azure_ad
+        shell: pwsh
+        run: |
+          $password = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 12 | ForEach-Object { [char]$_ }) + "1!Aa"
+          Write-Host "Generated password for Graph API users: $password"
+          ./deploy-graph-users.ps1 -CsvFile "./azure_users.csv" -Password $password
       
       - name: Get Public IP
         id: get_ip
@@ -268,6 +292,7 @@ jobs:
             generators/**/terraform.tfstate
             generators/**/terraform.tfstate.backup
             generators/**/*.tf
+            generators/**/*.csv
             generators/**/.terraform.lock.hcl
           retention-days: 30
       
@@ -284,6 +309,7 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Configuration" >> $GITHUB_STEP_SUMMARY
           echo "- **Deployment Type**: ${{ inputs.deployment_type }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Deployment Method**: ${{ inputs.deployment_method }}" >> $GITHUB_STEP_SUMMARY
           echo "- **UPN Suffix**: ${{ inputs.upn_suffix }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Lab Name**: ${{ inputs.lab_name }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Azure Location**: ${{ inputs.azure_location }}" >> $GITHUB_STEP_SUMMARY
