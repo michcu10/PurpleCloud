@@ -14,6 +14,9 @@ parser.add_argument('-n', '--name', dest='name')
 # Add argument for location
 parser.add_argument('-l', '--location', dest='location')
 
+# Add argument for IP address whitelist
+parser.add_argument('-ip', '--ip-address', dest='ip_address', help='The client IP address to allow through the firewall')
+
 # parse arguments
 args = parser.parse_args()
 
@@ -24,30 +27,31 @@ tstorage_file = "storage.tf"
 tproviders_file = "providers.tf"
 
 # parse the name if specified
-# it will be used for resource group, key vault, and storage account
 default_name = "purplecloud"
 if not args.name:
     print("[+] Using default name: ", default_name)
 else:
     default_name = args.name
-    # Sanitize the name for storage account (must be lowercase alphanumeric only, 3-24 chars)
-    # Keep original for resource group and key vault, sanitize for storage account
     print("[+] Using name for resources: ", default_name)
 
+# parse the IP address if specified
+client_ip = None
+if args.ip_address:
+    client_ip = args.ip_address
+    print("[+] Using Client IP for firewall rules: ", client_ip)
+else:
+    print("[-] No Client IP specified. Firewall rules may block access.")
+
 # parse the Azure location if specified
-supported_azure_locations = ['westus', 'westus2', 'eastus', 'centralus', 'centraluseuap', 'southcentralus' , 'northcentralus', 'westcentralus', 'eastus2', 'eastus2euap', 'brazilsouth', 'brazilus', 'northeurope', 'westeurope', 'eastasia', 'southeastasia', 'japanwest', 'japaneast', 'koreacentral', 'koreasouth', 'southindia', 'westindia', 'centralindia', 'australiaeast', 'australiasoutheast', 'canadacentral', 'canadaeast', 'uksouth', 'ukwest', 'francecentral', 'francesouth', 'australiacentral', 'australiacentral2', 'uaecentral', 'uaenorth', 'southafricanorth', 'southafricawest', 'switzerlandnorth', 'switzerlandwest', 'germanynorth', 'germanywestcentral', 'norwayeast', 'norwaywest', 'brazilsoutheast', 'westus3', 'swedencentral', 'swedensouth'
-]
+supported_azure_locations = ['westus', 'westus2', 'eastus', 'centralus', 'centraluseuap', 'southcentralus' , 'northcentralus', 'westcentralus', 'eastus2', 'eastus2euap', 'brazilsouth', 'brazilus', 'northeurope', 'westeurope', 'eastasia', 'southeastasia', 'japanwest', 'japaneast', 'koreacentral', 'koreasouth', 'southindia', 'westindia', 'centralindia', 'australiaeast', 'australiasoutheast', 'canadacentral', 'canadaeast', 'uksouth', 'ukwest', 'francecentral', 'francesouth', 'australiacentral', 'australiacentral2', 'uaecentral', 'uaenorth', 'southafricanorth', 'southafricawest', 'switzerlandnorth', 'switzerlandwest', 'germanynorth', 'germanywestcentral', 'norwayeast', 'norwaywest', 'brazilsoutheast', 'westus3', 'swedencentral', 'swedensouth']
 
 default_location = "centralus"
 if not args.location:
     print("[+] Using default location: ", default_location)
-    #logging.info('[+] Using default location: %s', default_location)
 else:
     default_location = args.location
     if default_location in supported_azure_locations:
-        # this is a supported Azure location
         print("[+] Using Azure location: ", default_location)
-        #logging.info('[+] Using Azure location: %s', default_location)
     else:
         print("[-] This is not a supported azure location: ",default_location)
         print("[-] Check the supported_azure_locations if you need to add a new official Azure location")
@@ -104,6 +108,10 @@ locals {
 
 variable "storage_location" {
   default = "STORAGE_LOCATION"
+}
+
+variable "client_ip" {
+  default = "CLIENT_IP_ADDRESS"
 }
 
 variable "cc_csv" {
@@ -173,6 +181,12 @@ resource "azurerm_storage_account" "pc_storage" {
   account_replication_type = "LRS"
   allow_nested_items_to_be_public = false
   shared_access_key_enabled = false
+
+  network_rules {
+    default_action = "Deny"
+    ip_rules       = [var.client_ip]
+    bypass         = ["AzureServices"]
+  }
 
   depends_on = [azurerm_resource_group.pc_storage]
 
@@ -392,6 +406,12 @@ resource "azurerm_key_vault" "purplecloud" {
   tenant_id                  = data.azurerm_client_config.current_client.tenant_id
   sku_name                   = "premium"
   soft_delete_retention_days = 7
+
+  network_acls {
+    default_action = "Deny"
+    bypass         = "AzureServices"
+    ip_rules       = [var.client_ip]
+  }
 
   access_policy {
     tenant_id = data.azurerm_client_config.current_client.tenant_id
@@ -629,6 +649,9 @@ provider "azurerm" {
     resource_group {
       prevent_deletion_if_contains_resources = false
     }
+    key_vault {
+      purge_soft_delete_on_destroy = true
+    }
   }
   storage_use_azuread = true
 }
@@ -673,6 +696,13 @@ else:
 
 # replace the storage account name
 storage_template = storage_template.replace("PURPLECLOUD-STORAGE", storage_account_name)
+
+# replace the client_ip variable
+if client_ip:
+    storage_template = storage_template.replace("CLIENT_IP_ADDRESS", client_ip)
+else:
+    # Fallback to a dummy private IP if no public IP is detected (so Terraform validates but blocks external)
+    storage_template = storage_template.replace("CLIENT_IP_ADDRESS", "10.0.0.1")
 
 # write the file
 n = storage_text_file.write(storage_template)

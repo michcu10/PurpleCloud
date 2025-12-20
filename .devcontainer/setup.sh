@@ -16,7 +16,19 @@ sudo apt-get install -y \
     jq \
     ca-certificates \
     gnupg \
-    lsb-release
+    lsb-release \
+    software-properties-common \
+    python3-pip
+
+# Install Terraform
+echo "📦 Installing Terraform..."
+wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt-get update && sudo apt-get install -y terraform
+
+# Install Python faker module
+echo "📦 Installing Python faker module..."
+python3 -m pip install faker
 
 # Install Bicep
 echo "📦 Installing Bicep..."

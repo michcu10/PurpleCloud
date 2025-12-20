@@ -129,6 +129,8 @@ else:
 
 # A list of users 
 users_list = []
+# A set of usernames for uniqueness check
+usernames_seen = set()
 
 # Users csv file
 users_csv = "azure_users.csv"
@@ -206,16 +208,19 @@ duser_count = int(args.user_count)
 ### Insert the user into a list only if unique
 ### Loop until the users_added equals desired users
 print("[+] Creating unique user list")
+faker = Faker()
 while users_added < duser_count: 
-    faker = Faker()
-    first = faker.unique.first_name() 
-    last = faker.unique.last_name() 
+    first = faker.first_name() 
+    last = faker.last_name() 
     display_name = first + " " + last
-    if display_name in users_list:
-        print("    [-] Duplicate user %s ~ not adding to users list" % (display_name))
+    username = (first + last).lower()
+    
+    if display_name in users_list or username in usernames_seen:
+        print("    [-] Duplicate user or username %s (%s) ~ not adding to users list" % (display_name, username))
         duplicate_count+=1
     else:
         users_list.append(display_name)
+        usernames_seen.add(username)
         users_added+=1
 
 print("[+] Number of users added into list: ",len(users_list))

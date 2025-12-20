@@ -21,6 +21,9 @@ parser.add_argument('-a', '--admin', dest='admin_set')
 # Add argument for password
 parser.add_argument('-p', '--password', dest='password_set')
 
+# Add argument to use existing resource group (data source) instead of creating one
+parser.add_argument('-e', '--existing', dest='use_existing_rg', action='store_true', help='Use existing Resource Group instead of creating one')
+
 # Add argument enabling a system-assigned Identity (Default:  Not Enabled)
 parser.add_argument('-sa', '--system_identity', dest='system_assigned_identity', action='store_true') 
 
@@ -269,16 +272,16 @@ resource "random_pet" "mi_rp_string" {
 }
 # Random String for password (Second part of password)
 resource "random_string" "mi_password" {
-  length  = 4
-  special = false
+  length  = 8
+  min_upper = 1
+  min_numeric = 1
+  min_special = 1
+  special = true
   upper   = true
 }
 
 # Resource group for managed identity lab
-resource "azurerm_resource_group" "pcmi" {
-  name     = local.mi_friendly_name
-  location = var.mi_location
-}
+RESOURCE_GROUP_BLOCK
 
 # Create the User Assigned Managed Identity
 resource "azurerm_user_assigned_identity" "uai" {
@@ -312,7 +315,7 @@ resource "azurerm_key_vault_access_policy" "uai" {
 }
 
 resource "azurerm_key_vault" "purplecloud_mi" {
-  name                       = "${local.mi_friendly_name}-mi"
+  name                       = "${local.mi_friendly_name}-mi-${random_string.misuffix.id}"
   location                   = azurerm_resource_group.pcmi.location
   resource_group_name        = azurerm_resource_group.pcmi.name 
   tenant_id                  = data.azurerm_client_config.mi.tenant_id
@@ -466,8 +469,8 @@ resource "azurerm_storage_account" "mi_storage" {
   location                 = azurerm_resource_group.pcmi.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
-  allow_nested_items_to_be_public = true
-  shared_access_key_enabled = true
+  allow_nested_items_to_be_public = false
+  shared_access_key_enabled = false
 
   depends_on = [azurerm_resource_group.pcmi]
 
@@ -487,7 +490,7 @@ resource "azurerm_role_assignment" "mi_storage_contributor" {
 resource "azurerm_storage_container" "mi_container1" {
   name                  = local.mi_container1
   storage_account_name  = azurerm_storage_account.mi_storage.name
-  container_access_type = "blob"
+  container_access_type = "private"
 
   depends_on = [
     azurerm_resource_group.pcmi,
@@ -499,7 +502,7 @@ resource "azurerm_storage_container" "mi_container1" {
 resource "azurerm_storage_container" "mi_container2" {
   name                  = local.mi_container2
   storage_account_name  = azurerm_storage_account.mi_storage.name
-  container_access_type = "container"
+  container_access_type = "private"
 
   depends_on = [
     azurerm_resource_group.pcmi,
@@ -614,33 +617,7 @@ resource "azurerm_storage_blob" "mi_hr3_xlsx" {
   type                   = "Block"
   source                 = "${path.module}/data/hr.xlsx"
 }
-# Azure files share name - HR
-resource "azurerm_storage_share" "mi_hr" {
-  name                 = var.mi_hr_share
-  storage_account_name = azurerm_storage_account.mi_storage.name
-  quota                = 50
-}
 
-# Azure files share name - Finance
-resource "azurerm_storage_share" "mi_finance" {
-  name                 = var.mi_finance_share
-  storage_account_name = azurerm_storage_account.mi_storage.name
-  quota                = 50
-}
-
-# Sample HR file
-resource "azurerm_storage_share_file" "mi_hr1" {
-  name             = var.mi_hr_file1
-  storage_share_id = azurerm_storage_share.mi_hr.id
-  source           = "${path.module}/data/hr.xlsx"
-}
-
-# Sample Finance file
-resource "azurerm_storage_share_file" "mi_finance1" {
-  name             = var.mi_finance_file1
-  storage_share_id = azurerm_storage_share.mi_finance.id
-  source           = "${path.module}/data/finance.xlsx"
-}
 
 # Create the VNet
 resource "azurerm_virtual_network" "managed_identity" {
@@ -848,14 +825,6 @@ ${azurerm_storage_blob.mi_customer1_csv.name}
 ${azurerm_storage_blob.mi_finance1_xlsx.name}
 ${azurerm_storage_blob.mi_hr1_xlsx.name}
 
------
-Azure File Shares
------
-Share URL:  https://${azurerm_storage_account.mi_storage.name}.file.core.windows.net/${azurerm_storage_share.mi_finance.name}
-File  URL:  https://${azurerm_storage_account.mi_storage.name}.file.core.windows.net/${azurerm_storage_share.mi_finance.name}/${azurerm_storage_share_file.mi_finance1.name}
-
-Share URL:  https://${azurerm_storage_account.mi_storage.name}.file.core.windows.net/${azurerm_storage_share.mi_hr.name}
-File  URL:  https://${azurerm_storage_account.mi_storage.name}.file.core.windows.net/${azurerm_storage_share.mi_hr.name}/${azurerm_storage_share_file.mi_hr1.name}
 
 ---------
 Key Vault
@@ -998,7 +967,31 @@ else:
 if args.admin_set:
     mi_template = mi_template.replace("MIADMIN_DEFAULT", args.admin_set) 
 else:
-    mi_template = mi_template.replace("MIADMIN_DEFAULT", default_admin_username) 
+    mi_template = mi_template.replace("MIADMIN_DEFAULT", default_admin_username)
+
+# Handle Resource Group (Create vs Existing)
+if args.use_existing_rg:
+    print("[+] Using EXISTING Resource Group (Data Source)")
+    rg_block = '''
+data "azurerm_resource_group" "pcmi" {
+  name = local.mi_friendly_name
+}
+'''
+    mi_template = mi_template.replace("RESOURCE_GROUP_BLOCK", rg_block)
+    
+    # Critical Fix: When using data source, we must update all references
+    # from 'azurerm_resource_group.pcmi' to 'data.azurerm_resource_group.pcmi'
+    # The only place we DON'T want this is in the definition block itself, which is already handled above.
+    mi_template = mi_template.replace("azurerm_resource_group.pcmi", "data.azurerm_resource_group.pcmi")
+    
+else:
+    rg_block = '''
+resource "azurerm_resource_group" "pcmi" {
+  name     = local.mi_friendly_name
+  location = var.mi_location
+}
+'''
+    mi_template = mi_template.replace("RESOURCE_GROUP_BLOCK", rg_block)
 
 # replace the password with user supplied if necessary 
 if args.password_set:

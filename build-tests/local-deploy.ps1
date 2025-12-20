@@ -48,43 +48,48 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [ValidateSet('cloud-only-basic', 'cloud-only-full', 'azure-ad-only', 'managed-identity-only', 'storage-only')]
     [string]$DeploymentType,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [int]$UserCount = 100,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [int]$AppCount = 7,
 
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [string]$UpnSuffix,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [switch]$EnablePrivilegedRoles = $true,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string]$LabName = "ZeroTrustLab",
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [ValidateSet('eastus', 'westus', 'centralus', 'northeurope', 'westeurope', 'southeastasia')]
     [string]$AzureLocation = "eastus",
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [int]$Parallelism = 5,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [switch]$DryRun,
 
-    [Parameter(Mandatory=$false)]
-    [switch]$SkipPrerequisiteCheck
+    [Parameter(Mandatory = $false)]
+    [switch]$SkipPrerequisiteCheck,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('Terraform', 'GraphAPI')]
+    [string]$DeploymentMethod = "Terraform"
 )
 
 # Configuration
 $ErrorActionPreference = "Stop"
 $TF_VERSION = "1.5.0"
 $PYTHON_VERSION = "3.8"
+$Script:PythonCommand = "python" # Default
 $WORKSPACE_ROOT = Split-Path -Parent $PSScriptRoot
 $ENV_FILE = Join-Path $PSScriptRoot ".env"
 $LOGS_DIR = Join-Path $PSScriptRoot "logs"
@@ -92,13 +97,13 @@ $transcriptStarted = $false
 
 # ANSI color codes for better output
 $Script:Colors = @{
-    Reset = "`e[0m"
-    Red = "`e[31m"
-    Green = "`e[32m"
+    Reset  = "`e[0m"
+    Red    = "`e[31m"
+    Green  = "`e[32m"
     Yellow = "`e[33m"
-    Blue = "`e[34m"
-    Cyan = "`e[36m"
-    Bold = "`e[1m"
+    Blue   = "`e[34m"
+    Cyan   = "`e[36m"
+    Bold   = "`e[1m"
 }
 
 function Write-ColorOutput {
@@ -113,7 +118,8 @@ function Write-ColorOutput {
     
     if ($NoNewline) {
         Write-Host "$colorCode$Message$resetCode" -NoNewline
-    } else {
+    }
+    else {
         Write-Host "$colorCode$Message$resetCode"
     }
 }
@@ -218,7 +224,8 @@ function Test-AzureNamingConventions {
     if ($issues.Count -gt 0) {
         Write-Warning "Resource naming validation found potential issues:"
         $issues | ForEach-Object { Write-ColorOutput "  - $_" -Color "Yellow" }
-    } else {
+    }
+    else {
         Write-Success "Resource naming validation passed"
     }
 }
@@ -255,7 +262,8 @@ function Connect-AzureServicePrincipal {
         Write-ColorOutput "  Tenant: $($account.tenantId)" -Color "Cyan"
         Write-ColorOutput "  Service Principal: $($EnvVars['ARM_CLIENT_ID'])" -Color "Cyan"
         
-    } catch {
+    }
+    catch {
         Write-ErrorMsg "Azure authentication failed: $_"
         Write-Host "Please verify your Service Principal credentials in .env file"
         throw
@@ -273,10 +281,12 @@ function Test-Prerequisites {
         $azVersion = az --version 2>$null | Select-Object -First 1
         if ($azVersion) {
             Write-Success "Azure CLI installed: $azVersion"
-        } else {
+        }
+        else {
             throw "Azure CLI not found"
         }
-    } catch {
+    }
+    catch {
         Write-ErrorMsg "Azure CLI not installed or not in PATH"
         Write-Host "Install from: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli"
         $allGood = $false
@@ -302,10 +312,12 @@ function Test-Prerequisites {
                     Write-Warning "Recommended Terraform version is $TF_VERSION or later"
                 }
             }
-        } else {
+        }
+        else {
             throw "Terraform not found"
         }
-    } catch {
+    }
+    catch {
         Write-ErrorMsg "Terraform not installed or not in PATH"
         Write-Host "Install from: https://www.terraform.io/downloads"
         $allGood = $false
@@ -313,40 +325,61 @@ function Test-Prerequisites {
     
     # Check Python
     Write-Step "Checking Python..."
+    $pythonFound = $false
+    
+    # Try python first
     try {
-        $pythonVersion = python --version 2>$null
-        if ($pythonVersion) {
+        $pythonVersion = & python --version 2>$null
+        if ($LASTEXITCODE -eq 0) {
+            $Script:PythonCommand = "python"
+            $pythonFound = $true
             Write-Success "Python installed: $pythonVersion"
-        } else {
-            # Try python3
-            $pythonVersion = python3 --version 2>$null
-            if ($pythonVersion) {
-                Write-Success "Python installed: $pythonVersion"
-            } else {
-                throw "Python not found"
+        }
+    }
+    catch {}
+
+    # If python not found, try python3
+    if (-not $pythonFound) {
+        try {
+            $pythonVersion = & python3 --version 2>$null
+            if ($LASTEXITCODE -eq 0) {
+                $Script:PythonCommand = "python3"
+                $pythonFound = $true
+                Write-Success "Python installed (as python3): $pythonVersion"
             }
         }
-    } catch {
+        catch {}
+    }
+
+    if (-not $pythonFound) {
         Write-ErrorMsg "Python not installed or not in PATH"
         Write-Host "Install from: https://www.python.org/downloads/"
         $allGood = $false
     }
-    
-    # Check faker module
-    Write-Step "Checking Python faker module..."
-    try {
-        # Try to import faker (version check doesn't work in newer versions)
-        $fakerCheck = python -c "import faker; print('OK')" 2>$null
-        if ($fakerCheck -eq 'OK') {
-            Write-Success "faker module installed"
-        } else {
-            Write-Warning "faker module not installed. Run 'pip install faker'"
-            Write-ColorOutput "  Attempting to install..." -Color "Yellow"
-            python -m pip install faker --quiet
-            Write-Success "faker module installed"
+    else {
+        # Check faker module
+        Write-Step "Checking Python faker module (using $Script:PythonCommand)..."
+        try {
+            # Try to import faker
+            $fakerCheck = & $Script:PythonCommand -c "import faker; print('OK')" 2>$null
+            if ($fakerCheck -eq 'OK') {
+                Write-Success "faker module installed"
+            }
+            else {
+                Write-Warning "faker module not installed. Run 'pip install faker'"
+                Write-ColorOutput "  Attempting to install..." -Color "Yellow"
+                & $Script:PythonCommand -m pip install faker --quiet
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Success "faker module installed"
+                }
+                else {
+                    throw "Failed to install faker"
+                }
+            }
         }
-    } catch {
-        Write-Warning "Could not verify/install faker module"
+        catch {
+            Write-Warning "Could not verify/install faker module: $_"
+        }
     }
     
     if (-not $allGood) {
@@ -371,10 +404,10 @@ function Invoke-AzureADDeployment {
     }
     
     # Build Python command
-    Write-Step "Generating Terraform configuration..."
+    Write-Step "Generating users list (using internal python script)..."
     $privFlags = if ($EnablePrivilegedRoles) { "-aa -pra -ga" } else { "" }
     
-    $pythonCmd = "python azure_ad.py -c $UserCount -u $UpnSuffix --apps $AppCount --groups 4 $privFlags"
+    $pythonCmd = "$Script:PythonCommand azure_ad.py -c $UserCount -u $UpnSuffix --apps $AppCount --groups 4 $privFlags"
     Write-ColorOutput "  Command: $pythonCmd" -Color "Cyan"
     
     if (-not $DryRun) {
@@ -382,65 +415,94 @@ function Invoke-AzureADDeployment {
         if ($LASTEXITCODE -ne 0) {
             throw "Python script failed"
         }
-        Write-Success "Terraform configuration generated"
+        Write-Success "Configuration/Data generated"
     }
-    
-    # Terraform Init
-    Write-Step "Initializing Terraform..."
-    if (-not $DryRun) {
-        terraform init
-        if ($LASTEXITCODE -ne 0) {
-            throw "Terraform init failed"
-        }
-        Write-Success "Terraform initialized"
-    }
-    
-    # Terraform Plan
-    Write-Step "Creating Terraform plan..."
-    if (-not $DryRun) {
-        terraform plan -input=false "-out=azure_ad.tfplan"
-        if ($LASTEXITCODE -ne 0) {
-            throw "Terraform plan failed"
-        }
-        Write-Success "Terraform plan created"
-    }
-    
-    # Terraform Apply
-    Write-Step "Applying Terraform configuration (this may take several minutes)..."
-    if (-not $DryRun) {
-        $maxRetries = 3
-        $retryCount = 0
-        $success = $false
+
+    if ($DeploymentMethod -eq "GraphAPI") {
+        # GRAPH API DEPLOYMENT
+        Write-Header "Executing Graph API Deployment"
         
-        while ($retryCount -lt $maxRetries -and -not $success) {
-            Write-ColorOutput "  Attempt $($retryCount + 1) of $maxRetries..." -Color "Yellow"
-            
-            if ($retryCount -eq 0) {
-                # First attempt: use the saved plan
-                terraform apply -auto-approve "-parallelism=$Parallelism" -input=false "-lock-timeout=30m" azure_ad.tfplan
-            } else {
-                # Retry attempts: remove stale plan and apply directly
-                if (Test-Path "azure_ad.tfplan") {
-                    Remove-Item "azure_ad.tfplan" -Force
-                    Write-ColorOutput "  Removed stale plan file" -Color "Yellow"
-                }
-                Write-ColorOutput "  Refreshing state and applying changes..." -Color "Yellow"
-                terraform apply -auto-approve "-parallelism=$Parallelism" -input=false "-lock-timeout=30m" -refresh=true
+        $csvFile = Join-Path $generatorPath "azure_users.csv"
+        
+        # Generate a random password for all users (simplification for lab)
+        $password = -join ((65..90) + (97..122) + (48..57) | Get-Random -Count 12 | ForEach-Object { [char]$_ }) + "1!Aa"
+        Write-ColorOutput "generated password for users: $password" -Color "Yellow"
+        
+        $graphCmd = "pwsh .\deploy-graph-users.ps1 -CsvFile `"$csvFile`" -Password `"$password`""
+        if ($DryRun) { $graphCmd += " -DryRun" }
+        
+        Write-Step "Running Graph API script..."
+        Write-ColorOutput "  Command: $graphCmd" -Color "Cyan"
+        
+        Invoke-Expression $graphCmd
+        if ($LASTEXITCODE -ne 0) {
+            throw "Graph API script failed"
+        }
+        
+    }
+    else {
+        # TERRAFORM DEPLOYMENT (Existing Logic)
+        
+        # Terraform Init
+        Write-Step "Initializing Terraform..."
+        if (-not $DryRun) {
+            terraform init
+            if ($LASTEXITCODE -ne 0) {
+                throw "Terraform init failed"
             }
+            Write-Success "Terraform initialized"
+        }
+        
+        # Terraform Plan
+        Write-Step "Creating Terraform plan..."
+        if (-not $DryRun) {
+            terraform plan -input=false "-out=azure_ad.tfplan"
+            if ($LASTEXITCODE -ne 0) {
+                throw "Terraform plan failed"
+            }
+            Write-Success "Terraform plan created"
+        }
+        
+        # Terraform Apply
+        Write-Step "Applying Terraform configuration (this may take several minutes)..."
+        if (-not $DryRun) {
+            $maxRetries = 3
+            $retryCount = 0
+            $success = $false
             
-            if ($LASTEXITCODE -eq 0) {
-                $success = $true
-                Write-Success "Azure AD resources deployed successfully"
-            } else {
-                $retryCount++
-                if ($retryCount -lt $maxRetries) {
-                    Write-Warning "Apply failed. Waiting 90 seconds before retry..."
-                    Write-ColorOutput "  This may be due to Azure AD replication delays or transient errors" -Color "Yellow"
-                    Start-Sleep -Seconds 90
-                } else {
-                    Write-ErrorMsg "All retry attempts exhausted for Azure AD deployment"
-                    Write-Warning "Partial deployment may exist. Check Azure Portal and run local-cleanup.ps1 if needed"
-                    throw "Azure AD deployment failed after $maxRetries attempts"
+            while ($retryCount -lt $maxRetries -and -not $success) {
+                Write-ColorOutput "  Attempt $($retryCount + 1) of $maxRetries..." -Color "Yellow"
+                
+                if ($retryCount -eq 0) {
+                    # First attempt: use the saved plan
+                    terraform apply -auto-approve "-parallelism=$Parallelism" -input=false "-lock-timeout=30m" azure_ad.tfplan
+                }
+                else {
+                    # Retry attempts: remove stale plan and apply directly
+                    if (Test-Path "azure_ad.tfplan") {
+                        Remove-Item "azure_ad.tfplan" -Force
+                        Write-ColorOutput "  Removed stale plan file" -Color "Yellow"
+                    }
+                    Write-ColorOutput "  Refreshing state and applying changes..." -Color "Yellow"
+                    terraform apply -auto-approve "-parallelism=$Parallelism" -input=false "-lock-timeout=30m" -refresh=true
+                }
+                
+                if ($LASTEXITCODE -eq 0) {
+                    $success = $true
+                    Write-Success "Azure AD resources deployed successfully"
+                }
+                else {
+                    $retryCount++
+                    if ($retryCount -lt $maxRetries) {
+                        Write-Warning "Apply failed. Waiting 90 seconds before retry..."
+                        Write-ColorOutput "  This may be due to Azure AD replication delays or transient errors" -Color "Yellow"
+                        Start-Sleep -Seconds 90
+                    }
+                    else {
+                        Write-ErrorMsg "All retry attempts exhausted for Azure AD deployment"
+                        Write-Warning "Partial deployment may exist. Check Azure Portal and run local-cleanup.ps1 if needed"
+                        throw "Azure AD deployment failed after $maxRetries attempts"
+                    }
                 }
             }
         }
@@ -455,8 +517,12 @@ function Invoke-StorageDeployment {
     $generatorPath = Join-Path $WORKSPACE_ROOT "generators\storage"
     Set-Location $generatorPath
     
+    # Get Public IP
+    $clientIp = Get-PublicIp
+    $ipArg = if ($clientIp) { "-ip $clientIp" } else { "" }
+    
     Write-Step "Generating Terraform configuration..."
-    $pythonCmd = "python storage.py -n $LabName -l $AzureLocation"
+    $pythonCmd = "$Script:PythonCommand storage.py -n $LabName -l $AzureLocation $ipArg"
     Write-ColorOutput "  Command: $pythonCmd" -Color "Cyan"
     
     if (-not $DryRun) {
@@ -507,7 +573,14 @@ function Invoke-ManagedIdentityDeployment {
     Set-Location $generatorPath
     
     Write-Step "Generating Terraform configuration..."
-    $pythonCmd = "python managed_identity.py -u $UpnSuffix -ua owner -sa -n $LabName -l $AzureLocation"
+    
+    # Determine if we should reuse existing RG (e.g. created by Storage deployment)
+    $existingRgArg = ""
+    if ($DeploymentType -eq "cloud-only-full") {
+        $existingRgArg = "-e"
+    }
+
+    $pythonCmd = "$Script:PythonCommand managed_identity.py -u $UpnSuffix -ua owner -sa -n $LabName -l $AzureLocation $existingRgArg"
     Write-ColorOutput "  Command: $pythonCmd" -Color "Cyan"
     
     if (-not $DryRun) {
@@ -548,6 +621,23 @@ function Invoke-ManagedIdentityDeployment {
     Set-Location $WORKSPACE_ROOT
 }
 
+function Get-PublicIp {
+    Write-Step "Detecting public IP address for firewall rules..."
+    try {
+        $ip = Invoke-RestMethod -Uri "https://api.ipify.org" -ErrorAction Stop
+        if ($ip -match '^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$') {
+            Write-Success "Detected Public IP: $ip"
+            return $ip
+        }
+        throw "Invalid IP format received"
+    }
+    catch {
+        Write-Warning "Could not detect public IP: $_"
+        Write-Warning "Storage firewall rules may not include your client IP."
+        return $null
+    }
+}
+
 function Get-ResourceGroups {
     Write-Step "Capturing created resource groups..."
     
@@ -560,11 +650,13 @@ function Get-ResourceGroups {
                 Write-ColorOutput "  • $_" -Color "Cyan"
             }
             return $rgs
-        } else {
+        }
+        else {
             Write-Warning "No resource groups found matching criteria"
             return $null
         }
-    } catch {
+    }
+    catch {
         Write-Warning "Could not retrieve resource groups: $_"
         return $null
     }
@@ -587,7 +679,8 @@ function Show-DeploymentSummary {
     Write-ColorOutput "  • Azure Location: $AzureLocation" -Color "Cyan"
     Write-ColorOutput "  • Users Created: $UserCount" -Color "Cyan"
     Write-ColorOutput "  • Apps Created: $AppCount" -Color "Cyan"
-    Write-ColorOutput "  • Privileged Roles: $EnablePrivilegedRoles" -Color "Cyan"    Write-ColorOutput "  • Parallelism: $Parallelism" -Color "Cyan"    
+    Write-ColorOutput "  • Privileged Roles: $EnablePrivilegedRoles" -Color "Cyan"
+    Write-ColorOutput "  • Parallelism: $Parallelism" -Color "Cyan"
     Write-ColorOutput "`nResources:" -Color "Bold"
     Write-ColorOutput "  • Deployment Time: $($duration.ToString('hh\:mm\:ss'))" -Color "Cyan"
     Write-ColorOutput "  • Timestamp: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss UTC')" -Color "Cyan"
@@ -624,7 +717,8 @@ try {
         $logFile = Join-Path $LOGS_DIR ("local-deploy-{0}-{1}.log" -f $DeploymentType, $timestamp)
         Start-Transcript -Path $logFile -IncludeInvocationHeader -Force | Out-Null
         $transcriptStarted = $true
-    } catch {
+    }
+    catch {
         Write-Warning "Unable to start transcript logging: $_"
     }
     
@@ -641,7 +735,8 @@ try {
     # Authenticate with Azure using Service Principal
     if (-not $DryRun) {
         Connect-AzureServicePrincipal -EnvVars $envVars
-    } else {
+    }
+    else {
         Write-ColorOutput "  [DRY RUN] Would authenticate with Service Principal" -Color "Cyan"
     }
     
@@ -649,7 +744,8 @@ try {
     if (-not $SkipPrerequisiteCheck) {
         Test-Prerequisites
         Test-AzureNamingConventions -Name $LabName
-    } else {
+    }
+    else {
         Write-Warning "Skipping prerequisite checks"
     }
     
@@ -677,7 +773,8 @@ try {
     # Capture resource groups
     if (-not $DryRun) {
         $resourceGroups = Get-ResourceGroups
-    } else {
+    }
+    else {
         $resourceGroups = $null
     }
     
@@ -686,7 +783,8 @@ try {
     
     Write-Success "`n✅ Deployment Complete!"
     
-} catch {
+}
+catch {
     Write-ErrorMsg "`n❌ Deployment failed: $_"
     Write-ColorOutput $_.ScriptStackTrace -Color "Red"
     
@@ -716,7 +814,8 @@ try {
     }
     
     exit 1
-} finally {
+}
+finally {
     if ($transcriptStarted) {
         try { Stop-Transcript | Out-Null } catch {}
     }

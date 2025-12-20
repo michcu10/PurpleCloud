@@ -15,8 +15,10 @@ Before using these scripts, ensure you have the following installed:
 
 1. **Azure CLI** - [Install guide](https://docs.microsoft.com/en-us/cli/azure/install-azure-cli)
 2. **Terraform** (v1.5.0 or later) - [Download](https://www.terraform.io/downloads)
-3. **Python** (v3.8 or later) - [Download](https://www.python.org/downloads/)
-4. **Python faker module** - `pip install faker`
+3. **Python** (v3.8 or later) - [Download](https://www.python.org/downloads/). The scripts automatically detect both `python` and `python3` executables.
+4. **Python faker module** - `pip install faker`. The scripts will attempt to auto-install this if missing.
+
+> **Note on Graph API**: For faster, bulk user creation, the scripts support a Graph API method (see below). This method is now **idempotent**—it will skip users that already exist instead of failing.
 
 ### Authentication Setup
 
@@ -136,6 +138,19 @@ Test what would be deployed without making changes:
     -DryRun
 ```
 
+### Graph API Deployment (Faster Bulk Users)
+
+To use the Microsoft Graph API for user creation (bypassing Terraform state overhead):
+
+```powershell
+.\build-tests\local-deploy.ps1 `
+    -DeploymentType cloud-only-basic `
+    -UpnSuffix "test.onmicrosoft.com" `
+    -DeploymentMethod GraphAPI `
+    -UserCount 1000
+```
+*Note: This method is idempotent and will gracefully handle users that already exist in your directory. It generates a random password for all users which is displayed in the console output.*
+
 ### Cleanup Resources Locally
 
 #### Clean All Resources
@@ -143,6 +158,16 @@ Test what would be deployed without making changes:
 ```powershell
 .\build-tests\local-cleanup.ps1 `
     -DeploymentType all `
+    -ConfirmDestroy "DESTROY"
+```
+*Note: The script automatically detects if Graph API was used by looking for `azure_users.csv`. It will clean up those users even if `-DeploymentMethod GraphAPI` is not explicitly specified.*
+
+#### Clean Graph API Resources
+
+```powershell
+.\build-tests\local-cleanup.ps1 `
+    -DeploymentType cloud-only-basic `
+    -DeploymentMethod GraphAPI `
     -ConfirmDestroy "DESTROY"
 ```
 
@@ -197,6 +222,7 @@ Test what would be deployed without making changes:
 | `-AzureLocation` | No | eastus | Azure region (eastus, westus, centralus, etc.) |
 | `-DryRun` | No | $false | Show what would be done without executing |
 | `-SkipPrerequisiteCheck` | No | $false | Skip prerequisite validation |
+| `-DeploymentMethod` | No | Terraform | Choose 'Terraform' (default) or 'GraphAPI' |
 
 ### local-cleanup.ps1 Parameters
 
@@ -208,6 +234,7 @@ Test what would be deployed without making changes:
 | `-CleanupOrphaned` | No | $true | Clean up orphaned resource groups |
 | `-Force` | No | $false | Skip confirmation prompts |
 | `-DryRun` | No | $false | Show what would be done without executing |
+| `-DeploymentMethod` | No | Terraform | Choose 'Terraform' (default) or 'GraphAPI' |
 
 *Required unless `-Force` is used
 
@@ -280,7 +307,8 @@ Test what would be deployed without making changes:
 ### local-deploy.ps1 Features
 
 - ✅ **Service Principal authentication** - Uses .env file (matches GitHub Actions)
-- ✅ **Prerequisite checking** - Validates Azure CLI, Terraform, Python installation
+- ✅ **Automatic Python Detection** - Detects `python` or `python3` seamlessly
+- ✅ **Prerequisite checking** - Validates Azure CLI, Terraform, and auto-installs Python `faker`
 - ✅ **Color-coded output** - Easy to read progress and status
 - ✅ **Retry logic** - Automatic retries for transient Azure AD failures
 - ✅ **Dry run mode** - Test without making changes
@@ -295,6 +323,7 @@ Test what would be deployed without making changes:
 - ✅ **State cleanup** - Optionally removes Terraform state files
 - ✅ **Async deletion** - Uses Azure async deletion for speed
 - ✅ **Cleanup summary** - Status report for all operations
+- ✅ **Auto-detect Graph API** - Automatically detects and cleans up non-Terraform managed users
 - ✅ **Force mode** - Skip confirmations for automation
 
 ## Troubleshooting
@@ -356,9 +385,11 @@ terraform --version  # Verify installation
 #### "faker module not installed"
 
 **Solution:**
+The scripts will now attempt to automatically install the `faker` module if it's missing during the prerequisite check. To install manually:
 ```powershell
 pip install faker
-python -c "import faker; print(faker.__version__)"  # Verify
+# or
+python3 -m pip install faker 
 ```
 
 #### "UPN suffix domain not verified"

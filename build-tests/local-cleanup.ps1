@@ -45,24 +45,28 @@
 
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory = $true)]
     [ValidateSet('all', 'cloud-only-basic', 'cloud-only-full', 'azure-ad-only', 'managed-identity-only', 'storage-only')]
     [string]$DeploymentType,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [string]$ConfirmDestroy,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [switch]$DeleteState,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [switch]$CleanupOrphaned = $true,
 
-    [Parameter(Mandatory=$false)]
+    [Parameter(Mandatory = $false)]
     [switch]$Force,
 
-    [Parameter(Mandatory=$false)]
-    [switch]$DryRun
+    [Parameter(Mandatory = $false)]
+    [switch]$DryRun,
+
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('Terraform', 'GraphAPI')]
+    [string]$DeploymentMethod = "Terraform"
 )
 
 # Configuration
@@ -72,13 +76,13 @@ $ENV_FILE = Join-Path $PSScriptRoot ".env"
 
 # ANSI color codes for better output
 $Script:Colors = @{
-    Reset = "`e[0m"
-    Red = "`e[31m"
-    Green = "`e[32m"
+    Reset  = "`e[0m"
+    Red    = "`e[31m"
+    Green  = "`e[32m"
     Yellow = "`e[33m"
-    Blue = "`e[34m"
-    Cyan = "`e[36m"
-    Bold = "`e[1m"
+    Blue   = "`e[34m"
+    Cyan   = "`e[36m"
+    Bold   = "`e[1m"
 }
 
 function Write-ColorOutput {
@@ -93,7 +97,8 @@ function Write-ColorOutput {
     
     if ($NoNewline) {
         Write-Host "$colorCode$Message$resetCode" -NoNewline
-    } else {
+    }
+    else {
         Write-Host "$colorCode$Message$resetCode"
     }
 }
@@ -205,7 +210,8 @@ function Connect-AzureServicePrincipal {
         Write-ColorOutput "  Tenant: $($account.tenantId)" -Color "Cyan"
         Write-ColorOutput "  Service Principal: $($EnvVars['ARM_CLIENT_ID'])" -Color "Cyan"
         
-    } catch {
+    }
+    catch {
         Write-ErrorMsg "Azure authentication failed: $_"
         Write-Host "Please verify your Service Principal credentials in .env file"
         throw
@@ -255,6 +261,21 @@ function Remove-AzureADResources {
     
     Set-Location $generatorPath
     
+    if ($DeploymentMethod -eq "GraphAPI" -or (Test-Path "azure_users.csv")) {
+        if (Test-Path "azure_users.csv") {
+            Write-Step "Cleaning up users via Graph API (detected azure_users.csv)..."
+            $graphCmd = "pwsh .\cleanup-graph-users.ps1 -CsvFile `"azure_users.csv`""
+            if ($DryRun) { $graphCmd += " -DryRun" }
+            
+            Write-ColorOutput "  Command: $graphCmd" -Color "Cyan"
+            Invoke-Expression $graphCmd
+            Write-Success "Graph API cleanup completed"
+        }
+        elseif ($DeploymentMethod -eq "GraphAPI") {
+            Write-Warning "DeploymentMethod set to GraphAPI but azure_users.csv not found at: $(Get-Location)"
+        }
+    }
+
     if ((Test-Path "terraform.tfstate") -or (Test-Path "users.tf")) {
         Write-Step "Initializing Terraform..."
         if (-not $DryRun) {
@@ -266,13 +287,16 @@ function Remove-AzureADResources {
             try {
                 terraform destroy -auto-approve
                 Write-Success "Azure AD cleanup complete"
-            } catch {
+            }
+            catch {
                 Write-Warning "Some resources may have already been deleted: $_"
             }
-        } else {
+        }
+        else {
             Write-ColorOutput "  [DRY RUN] Would run: terraform destroy -auto-approve" -Color "Cyan"
         }
-    } else {
+    }
+    else {
         Write-ColorOutput "ℹ️  No Azure AD state found, skipping..." -Color "Yellow"
     }
     
@@ -302,13 +326,16 @@ function Remove-StorageResources {
             try {
                 terraform destroy -auto-approve
                 Write-Success "Storage cleanup complete"
-            } catch {
+            }
+            catch {
                 Write-Warning "Some resources may have already been deleted: $_"
             }
-        } else {
+        }
+        else {
             Write-ColorOutput "  [DRY RUN] Would run: terraform destroy -auto-approve" -Color "Cyan"
         }
-    } else {
+    }
+    else {
         Write-ColorOutput "ℹ️  No Storage state found, skipping..." -Color "Yellow"
     }
     
@@ -338,13 +365,16 @@ function Remove-ManagedIdentityResources {
             try {
                 terraform destroy -auto-approve
                 Write-Success "Managed Identity cleanup complete"
-            } catch {
+            }
+            catch {
                 Write-Warning "Some resources may have already been deleted: $_"
             }
-        } else {
+        }
+        else {
             Write-ColorOutput "  [DRY RUN] Would run: terraform destroy -auto-approve" -Color "Cyan"
         }
-    } else {
+    }
+    else {
         Write-ColorOutput "ℹ️  No Managed Identity state found, skipping..." -Color "Yellow"
     }
     
@@ -359,7 +389,8 @@ function Remove-OrphanedResources {
     try {
         if (-not $DryRun) {
             $orphanedRGs = az group list --query "[?starts_with(name, 'PurpleCloud') || contains(name, 'ZeroTrust')].name" -o tsv
-        } else {
+        }
+        else {
             Write-ColorOutput "  [DRY RUN] Would run: az group list --query ..." -Color "Cyan"
             $orphanedRGs = "PurpleCloud-Example-RG`nPurpleCloud-Test-RG"
         }
@@ -386,10 +417,12 @@ function Remove-OrphanedResources {
                     # Use --no-wait for async deletion
                     az group delete --name $rg --yes --no-wait
                     Write-Success "  Deletion initiated for: $rg"
-                } catch {
+                }
+                catch {
                     Write-Warning "  Failed to delete $rg : $_"
                 }
-            } else {
+            }
+            else {
                 Write-ColorOutput "  [DRY RUN] Would delete: $rg" -Color "Cyan"
             }
         }
@@ -405,13 +438,15 @@ function Remove-OrphanedResources {
             
             if ([string]::IsNullOrWhiteSpace($remaining)) {
                 Write-Success "All PurpleCloud resource groups cleaned up"
-            } else {
+            }
+            else {
                 Write-Warning "Some resource groups may still be deleting (async operation)"
                 az group list --query "[?starts_with(name, 'PurpleCloud') || contains(name, 'ZeroTrust')].[name,properties.provisioningState]" -o table
             }
         }
         
-    } catch {
+    }
+    catch {
         Write-ErrorMsg "Error during orphaned resource cleanup: $_"
     }
 }
@@ -444,10 +479,12 @@ function Remove-TerraformState {
                 try {
                     Remove-Item -Path $file.FullName -Recurse -Force
                     $deletedCount++
-                } catch {
+                }
+                catch {
                     Write-Warning "  Failed to delete $($file.FullName): $_"
                 }
-            } else {
+            }
+            else {
                 Write-ColorOutput "  [DRY RUN] Would delete: $($file.FullName)" -Color "Cyan"
                 $deletedCount++
             }
@@ -456,7 +493,8 @@ function Remove-TerraformState {
     
     if ($deletedCount -gt 0) {
         Write-Success "Deleted $deletedCount Terraform state file(s)"
-    } else {
+    }
+    else {
         Write-ColorOutput "ℹ️  No Terraform state files found" -Color "Yellow"
     }
 }
@@ -510,7 +548,8 @@ try {
     # Authenticate with Azure using Service Principal
     if (-not $DryRun) {
         Connect-AzureServicePrincipal -EnvVars $envVars
-    } else {
+    }
+    else {
         Write-ColorOutput "  [DRY RUN] Would authenticate with Service Principal" -Color "Cyan"
     }
     
@@ -532,11 +571,13 @@ try {
         try {
             Remove-AzureADResources
             $results["Azure AD Cleanup"] = "Success"
-        } catch {
+        }
+        catch {
             Write-ErrorMsg "Azure AD cleanup failed: $_"
             $results["Azure AD Cleanup"] = "Failed"
         }
-    } else {
+    }
+    else {
         $results["Azure AD Cleanup"] = "Skipped"
     }
     
@@ -544,11 +585,13 @@ try {
         try {
             Remove-StorageResources
             $results["Storage Cleanup"] = "Success"
-        } catch {
+        }
+        catch {
             Write-ErrorMsg "Storage cleanup failed: $_"
             $results["Storage Cleanup"] = "Failed"
         }
-    } else {
+    }
+    else {
         $results["Storage Cleanup"] = "Skipped"
     }
     
@@ -556,11 +599,13 @@ try {
         try {
             Remove-ManagedIdentityResources
             $results["Managed Identity Cleanup"] = "Success"
-        } catch {
+        }
+        catch {
             Write-ErrorMsg "Managed Identity cleanup failed: $_"
             $results["Managed Identity Cleanup"] = "Failed"
         }
-    } else {
+    }
+    else {
         $results["Managed Identity Cleanup"] = "Skipped"
     }
     
@@ -569,11 +614,13 @@ try {
         try {
             Remove-OrphanedResources
             $results["Orphaned Resources Cleanup"] = "Success"
-        } catch {
+        }
+        catch {
             Write-ErrorMsg "Orphaned resources cleanup failed: $_"
             $results["Orphaned Resources Cleanup"] = "Failed"
         }
-    } else {
+    }
+    else {
         $results["Orphaned Resources Cleanup"] = "Skipped"
     }
     
@@ -582,21 +629,25 @@ try {
         try {
             Remove-TerraformState
             $results["State Deletion"] = "Success"
-        } catch {
+        }
+        catch {
             Write-ErrorMsg "State deletion failed: $_"
             $results["State Deletion"] = "Failed"
         }
-    } else {
+    }
+    else {
         $results["State Deletion"] = "Skipped"
     }
     
     # Show summary
     Show-CleanupSummary -Results $results -StartTime $startTime
     
-} catch {
+}
+catch {
     Write-ErrorMsg "`n❌ Cleanup failed: $_"
     Write-ColorOutput $_.ScriptStackTrace -Color "Red"
     exit 1
-} finally {
+}
+finally {
     Set-Location $WORKSPACE_ROOT
 }
