@@ -173,6 +173,13 @@ jobs:
             fi
           done
       
+      - name: Get Public IP
+        id: get_ip
+        run: |
+          IP=$(curl -s https://api.ipify.org)
+          echo "public_ip=$IP" >> $GITHUB_OUTPUT
+          echo "Runner Public IP: $IP"
+
       - name: Generate Terraform - Storage
         if: |
           inputs.deployment_type == 'cloud-only-full' || 
@@ -181,7 +188,8 @@ jobs:
         run: |
           python3 storage.py \
             -n ${{ inputs.lab_name }} \
-            -l ${{ inputs.azure_location }}
+            -l ${{ inputs.azure_location }} \
+            -ip ${{ steps.get_ip.outputs.public_ip }}
       
       - name: Terraform Init - Storage
         if: |
@@ -210,12 +218,18 @@ jobs:
           inputs.deployment_type == 'managed-identity-only'
         working-directory: generators/managed_identity
         run: |
+          EXISTING_RG_FLAG=""
+          if [ "${{ inputs.deployment_type }}" == "cloud-only-full" ]; then
+            EXISTING_RG_FLAG="-e"
+          fi
+          
           python3 managed_identity.py \
             -u ${{ inputs.upn_suffix }} \
             -ua owner \
             -sa \
             -n ${{ inputs.lab_name }} \
-            -l ${{ inputs.azure_location }}
+            -l ${{ inputs.azure_location }} \
+            $EXISTING_RG_FLAG
       
       - name: Terraform Init - Managed Identity
         if: |
