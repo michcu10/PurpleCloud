@@ -200,7 +200,22 @@ jobs:
       - name: Get Public IP
         id: get_ip
         run: |
-          IP=$(curl -s https://api.ipify.org)
+          # Try to get IP with retries and multiple services
+          IP=""
+          echo "Attempting to detect public IP..."
+          
+          IP=$(curl -s -f --retry 3 --retry-delay 5 https://api.ipify.org) || \
+          IP=$(curl -s -f --retry 3 --retry-delay 5 https://icanhazip.com) || \
+          IP=$(curl -s -f --retry 3 --retry-delay 5 https://ifconfig.me)
+          
+          # Trim whitespace
+          IP=$(echo "$IP" | tr -d '[:space:]')
+          
+          if [ -z "$IP" ]; then
+            echo "::error::Could not determine Runner Public IP after multiple attempts."
+            exit 1
+          fi
+          
           echo "public_ip=$IP" >> $GITHUB_OUTPUT
           echo "Runner Public IP: $IP"
 
