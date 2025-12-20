@@ -239,11 +239,31 @@ jobs:
           fi
           
           echo "Checking if Resource Group '$RG_NAME' exists..."
-          if az group exists --name "$RG_NAME"; then
+          if [ $(az group exists --name "$RG_NAME") = "true" ]; then
             echo "Resource Group '$RG_NAME' exists. Importing..."
             terraform import azurerm_resource_group.pc_storage /subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RG_NAME || echo "Import failed (maybe already imported)"
           else
             echo "Resource Group '$RG_NAME' does not exist. Terraform will create it."
+          fi
+
+      - name: Purge Soft-Deleted Key Vault
+        if: |
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'storage-only'
+        run: |
+          KV_NAME="${{ inputs.lab_name }}"
+          # Key Vault name must match what is generated in storage.py (which defaults to lab_name/args.name)
+          
+          echo "Checking for soft-deleted Key Vault '$KV_NAME'..."
+          DELETED_KV=$(az keyvault list-deleted --query "[?name=='$KV_NAME'].name" -o tsv)
+          
+          if [ -n "$DELETED_KV" ]; then
+            echo "Found soft-deleted Key Vault '$DELETED_KV'. Purging..."
+            az keyvault purge --name "$DELETED_KV" --location ${{ inputs.azure_location }} --no-wait
+            echo "Purge command sent. Waiting 60 seconds for cleanup..."
+            sleep 60
+          else
+            echo "No soft-deleted Key Vault found with name '$KV_NAME'."
           fi
 
       - name: Terraform Plan - Storage
@@ -308,7 +328,7 @@ jobs:
             RG_NAME="${{ inputs.lab_name }}"
             
             echo "Checking if Resource Group '$RG_NAME' exists..."
-            if az group exists --name "$RG_NAME"; then
+            if [ $(az group exists --name "$RG_NAME") = "true" ]; then
               echo "Resource Group '$RG_NAME' exists. Importing..."
               terraform import azurerm_resource_group.pcmi /subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RG_NAME || echo "Import failed (maybe already imported)"
             else
