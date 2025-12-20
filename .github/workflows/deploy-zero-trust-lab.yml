@@ -222,6 +222,30 @@ jobs:
         working-directory: generators/storage
         run: terraform init
       
+      - name: Import Resource Group (Storage)
+        if: |
+          inputs.deployment_type == 'cloud-only-full' || 
+          inputs.deployment_type == 'storage-only'
+        working-directory: generators/storage
+        run: |
+          # The name logic needs to match python script default or input
+          # In the python script: default_name = args.name (if provided) else "purplecloud"
+          # Then friendly_name = "PURPLECLOUD-FRIENDLY" replaced by default_name
+          # Resource group name is friendly_name
+          
+          RG_NAME="${{ inputs.lab_name }}"
+          if [ -z "$RG_NAME" ]; then
+            RG_NAME="purplecloud"
+          fi
+          
+          echo "Checking if Resource Group '$RG_NAME' exists..."
+          if az group exists --name "$RG_NAME"; then
+            echo "Resource Group '$RG_NAME' exists. Importing..."
+            terraform import azurerm_resource_group.pc_storage /subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RG_NAME || echo "Import failed (maybe already imported)"
+          else
+            echo "Resource Group '$RG_NAME' does not exist. Terraform will create it."
+          fi
+
       - name: Terraform Plan - Storage
         if: |
           inputs.deployment_type == 'cloud-only-full' || 
@@ -262,6 +286,35 @@ jobs:
         working-directory: generators/managed_identity
         run: terraform init
       
+      - name: Import Resource Group (Managed Identity)
+        if: |
+          inputs.deployment_type == 'managed-identity-only' &&
+          inputs.deployment_type != 'cloud-only-full'
+        working-directory: generators/managed_identity
+        run: |
+            # Logic similar to storage, check if RG exists and import.
+            # However, managed_identity uses a random suffix for RG defined in python script?
+            # Looking at managed_identity.tf template in python script:
+            # resource "azurerm_resource_group" "pcmi" { name = local.mi_friendly_name ... }
+            # local.mi_friendly_name = "PURPLECLOUD-FRIENDLY" -> replaced by args.name or default default_name
+            # default_name = "purpleidentity${random_string.misuffix.id}" if name not passed.
+            # If name IS passed (-n), then RG name is that name.
+            
+            # The workflow passes -n ${{ inputs.lab_name }} for cloud-only-full, but 
+            # for managed-identity-only checks?
+            # Wait, the workflow step "Generate Terraform - Managed Identity" passes:
+            # -n ${{ inputs.lab_name }}
+            
+            RG_NAME="${{ inputs.lab_name }}"
+            
+            echo "Checking if Resource Group '$RG_NAME' exists..."
+            if az group exists --name "$RG_NAME"; then
+              echo "Resource Group '$RG_NAME' exists. Importing..."
+              terraform import azurerm_resource_group.pcmi /subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$RG_NAME || echo "Import failed (maybe already imported)"
+            else
+              echo "Resource Group '$RG_NAME' does not exist. Terraform will create it."
+            fi
+
       - name: Terraform Plan - Managed Identity
         if: |
           inputs.deployment_type == 'cloud-only-full' || 

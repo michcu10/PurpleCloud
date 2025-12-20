@@ -267,26 +267,40 @@ jobs:
           echo "${{ steps.find_orphans.outputs.orphaned_rgs }}" | while read rg; do
             if [ -n "$rg" ]; then
               echo "Deleting: $rg"
-              az group delete --name "$rg" --yes --no-wait || echo "::warning::Failed to delete $rg"
+              az group delete --name "$rg" --yes || echo "::warning::Failed to delete $rg"
             fi
           done
-          echo "✅ Orphaned resource group deletion initiated (async)"
+          echo "✅ Orphaned resource group deletion initiated"
       
       - name: Verify Cleanup
         run: |
-          sleep 10
-          REMAINING=$(az group list \
-            --query "[?starts_with(name, 'PurpleCloud') || contains(name, 'ZeroTrust')].name" \
-            -o tsv | wc -l)
+          echo "Verifying cleanup (timeout: 10 minutes)..."
+          start_time=$(date +%s)
+          timeout=600
           
-          if [ "$REMAINING" -eq 0 ]; then
-            echo "✅ All PurpleCloud resource groups cleaned up"
-          else
-            echo "⚠️  Some resource groups may still be deleting (async operation)"
-            az group list \
-              --query "[?starts_with(name, 'PurpleCloud') || contains(name, 'ZeroTrust')].[name,properties.provisioningState]" \
-              -o table
-          fi
+          while true; do
+            REMAINING=$(az group list \
+              --query "[?starts_with(name, 'PurpleCloud') || contains(name, 'ZeroTrust')].name" \
+              -o tsv | wc -l)
+            
+            if [ "$REMAINING" -eq 0 ]; then
+              echo "✅ All PurpleCloud resource groups cleaned up"
+              break
+            fi
+            
+            current_time=$(date +%s)
+            elapsed=$((current_time - start_time))
+            if [ "$elapsed" -gt "$timeout" ]; then
+              echo "❌ Timeout waiting for cleanup."
+              az group list \
+                --query "[?starts_with(name, 'PurpleCloud') || contains(name, 'ZeroTrust')].[name,properties.provisioningState]" \
+                -o table
+              exit 1
+            fi
+            
+            echo "Waiting for $REMAINING resource groups to be deleted... (${elapsed}s elapsed)"
+            sleep 30
+          done
   
   cleanup-state:
     name: Delete Terraform State Files
