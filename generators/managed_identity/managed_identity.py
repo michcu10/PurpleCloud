@@ -144,6 +144,7 @@ locals {
   # The friendly name for the resource group, storage account, and key vault
   # if this is not specified at the command line the default will be randomly generated
   mi_friendly_name = "PURPLECLOUD-FRIENDLY"
+  mi_storage_account_name = "PURPLECLOUD-STORAGE${random_string.misuffix.id}"
   vnet_name_mi = "PURPLECLOUD-FRIENDLY"
   mi_nsg_name = "PURPLECLOUD-FRIENDLY"
   micreds        = "MICREDS" 
@@ -311,7 +312,7 @@ resource "azurerm_key_vault_access_policy" "uai" {
 }
 
 resource "azurerm_key_vault" "purplecloud_mi" {
-  name                       = local.mi_friendly_name 
+  name                       = "${local.mi_friendly_name}-mi"
   location                   = azurerm_resource_group.pcmi.location
   resource_group_name        = azurerm_resource_group.pcmi.name 
   tenant_id                  = data.azurerm_client_config.mi.tenant_id
@@ -344,11 +345,13 @@ resource "azurerm_key_vault" "purplecloud_mi" {
       "Delete",
       "Encrypt",
       "Get",
+      "GetRotationPolicy",
       "Import",
       "List",
       "Purge",
       "Recover",
       "Restore",
+      "SetRotationPolicy",
       "Sign",
       "UnwrapKey",
       "Update",
@@ -458,18 +461,26 @@ resource "azurerm_key_vault_certificate" "purplecloud_mi" {
 
 # Create the storage account
 resource "azurerm_storage_account" "mi_storage" {
-  name                     = local.mi_friendly_name
+  name                     = local.mi_storage_account_name
   resource_group_name      = azurerm_resource_group.pcmi.name
   location                 = azurerm_resource_group.pcmi.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
   allow_nested_items_to_be_public = true
+  shared_access_key_enabled = true
 
   depends_on = [azurerm_resource_group.pcmi]
 
   tags = {
     environment = "purplecloud-managed-identity-storage"
   }
+}
+
+# Assign Storage Blob Data Contributor role to current service principal
+resource "azurerm_role_assignment" "mi_storage_contributor" {
+  scope                = azurerm_storage_account.mi_storage.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = data.azurerm_client_config.mi.object_id
 }
 
 # Create storage container1 with access type of 'blob'
@@ -714,7 +725,7 @@ resource "azurerm_windows_virtual_machine" "managed_identity" {
   name                          = local.mi_friendly_name 
   resource_group_name           = azurerm_resource_group.pcmi.name 
   location                      = var.mi_location
-  size                       = "Standard_A1_v2"
+  size                       = "Standard_D2s_v3"
   computer_name  = local.micomputername
   admin_username = var.mi_admin_username
   admin_password = local.micreds 
@@ -889,6 +900,7 @@ terraform {
 
 provider "azurerm" {
   features {}
+  storage_use_azuread = true
 }
 
 AADPROVIDER
@@ -940,6 +952,19 @@ mi_template = default_mi_template.replace("MI_LOCATION",default_location)
 
 # replace the name variable
 mi_template = mi_template.replace("PURPLECLOUD-FRIENDLY",default_name) 
+
+# Sanitize storage account name (lowercase alphanumeric only, max 19 chars to allow for 5-char suffix)
+import re
+storage_account_name = re.sub(r'[^a-z0-9]', '', default_name.lower())[:19]
+# Ensure minimum length of 3
+if len(storage_account_name) < 3:
+    storage_account_name = "purplecloud"
+    print("[-] Storage account name too short after sanitization, using default: ", storage_account_name)
+else:
+    print("[+] Storage account name (sanitized): ", storage_account_name)
+
+# replace the storage account name
+mi_template = mi_template.replace("PURPLECLOUD-STORAGE", storage_account_name) 
 
 # replace the identity type in block 
 mi_template = mi_template.replace("IDENTITY_TYPE",identity_type) 

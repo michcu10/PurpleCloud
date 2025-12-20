@@ -4,6 +4,9 @@ import argparse
 import linecache
 ### Install Faker:  pip3 install faker
 
+# Set seed for deterministic user generation (required for Terraform idempotency)
+Faker.seed(42)
+
 # argparser stuff
 parser = argparse.ArgumentParser(description='A script to create users in terraform format for Azure Active Directory')
 
@@ -287,14 +290,24 @@ resource "random_pet" "rp_string" {
 }
 
 # Random String for Azure AD users (Second part of password)
+# Azure AD requires 3 out of 4 character types: lowercase, uppercase, numbers, special chars
 resource "random_string" "my_password" {
-    length  = 4
-    special = false
+    length  = 6
+    special = true
     upper   = true
+    lower   = true
+    numeric = true
+    min_special = 1
+    min_upper   = 1
+    min_lower   = 1
+    min_numeric = 1
+    override_special = "!@#$%&*()-_=+[]{}:?"
 }
 
 locals {
-    creds = "${random_pet.rp_string.id}-${random_string.my_password.id}"
+    # Password format: word1-word2-Special1Chars
+    # Ensures: lowercase (pet), uppercase, numeric, special chars (from random_string)
+    creds = "${random_pet.rp_string.id}-${random_string.my_password.result}"
 }
 
 output "azure_ad_details" {

@@ -1,0 +1,17 @@
+# Environment file with secrets
+.env
+
+# Terraform files
+*.tfstate
+*.tfstate.backup
+*.tfplan
+.terraform/
+.terraform.lock.hcl
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Logs
+*.log

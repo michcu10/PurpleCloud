@@ -25,11 +25,13 @@ tproviders_file = "providers.tf"
 
 # parse the name if specified
 # it will be used for resource group, key vault, and storage account
-default_name = "purplestorage${random_string.ssuffix.id}"
+default_name = "purplecloud"
 if not args.name:
     print("[+] Using default name: ", default_name)
 else:
     default_name = args.name
+    # Sanitize the name for storage account (must be lowercase alphanumeric only, 3-24 chars)
+    # Keep original for resource group and key vault, sanitize for storage account
     print("[+] Using name for resources: ", default_name)
 
 # parse the Azure location if specified
@@ -82,9 +84,13 @@ resource "random_password" "secret3" {
 }
 
 locals {
-  # The friendly name for the resource group, storage account, and key vault
+  # The friendly name for the resource group and key vault
   # if this is not specified at the command line the default will be randomly generated
   pstorage_friendly_name = "PURPLECLOUD-FRIENDLY"
+  
+  # Storage account name (must be lowercase alphanumeric only, 3-24 chars)
+  # Append random suffix to ensure global uniqueness
+  pstorage_account_name = "PURPLECLOUD-STORAGE${random_string.ssuffix.id}"
 
   # access type: blob
   pstorage_container1   = "container1"
@@ -160,12 +166,13 @@ resource "azurerm_resource_group" "pc_storage" {
 
 # Create the storage account
 resource "azurerm_storage_account" "pc_storage" {
-  name                     = local.pstorage_friendly_name
+  name                     = local.pstorage_account_name
   resource_group_name      = azurerm_resource_group.pc_storage.name
   location                 = azurerm_resource_group.pc_storage.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
-  allow_nested_items_to_be_public = true
+  allow_nested_items_to_be_public = false
+  shared_access_key_enabled = false
 
   depends_on = [azurerm_resource_group.pc_storage]
 
@@ -174,39 +181,74 @@ resource "azurerm_storage_account" "pc_storage" {
   }
 }
 
+# Get current client config for role assignments
+data "azurerm_client_config" "current_client" {}
+
+# Assign Storage Blob Data Contributor role to current service principal
+resource "azurerm_role_assignment" "storage_contributor" {
+  scope                = azurerm_storage_account.pc_storage.id
+  role_definition_name = "Storage Blob Data Contributor"
+  principal_id         = data.azurerm_client_config.current_client.object_id
+}
+
+# Assign Storage File Data Privileged Contributor for Azure Files
+resource "azurerm_role_assignment" "storage_file_contributor" {
+  scope                = azurerm_storage_account.pc_storage.id
+  role_definition_name = "Storage File Data Privileged Contributor"
+  principal_id         = data.azurerm_client_config.current_client.object_id
+}
+
+# Wait for role assignments to propagate
+resource "time_sleep" "wait_for_rbac" {
+  create_duration = "180s"
+  triggers = {
+    role_assignment_id = azurerm_role_assignment.storage_file_contributor.id
+  }
+  depends_on = [
+    azurerm_role_assignment.storage_contributor,
+    azurerm_role_assignment.storage_file_contributor
+  ]
+}
+
 # Create storage container1 with access type of 'blob'
 resource "azurerm_storage_container" "pstorage_container1" {
   name                  = local.pstorage_container1
-  storage_account_name  = azurerm_storage_account.pc_storage.name 
-  container_access_type = "blob"
+  storage_account_id    = azurerm_storage_account.pc_storage.id
+  container_access_type = "private"
 
   depends_on = [
     azurerm_resource_group.pc_storage,
-    azurerm_storage_account.pc_storage
+    azurerm_storage_account.pc_storage,
+    azurerm_role_assignment.storage_contributor,
+    time_sleep.wait_for_rbac
   ]
 }
 
 # Create storage container2 with access type of 'container'
 resource "azurerm_storage_container" "pstorage_container2" {
   name                  = local.pstorage_container2
-  storage_account_name  = azurerm_storage_account.pc_storage.name 
-  container_access_type = "container"
+  storage_account_id    = azurerm_storage_account.pc_storage.id
+  container_access_type = "private"
 
   depends_on = [
     azurerm_resource_group.pc_storage,
-    azurerm_storage_account.pc_storage
+    azurerm_storage_account.pc_storage,
+    azurerm_role_assignment.storage_contributor,
+    time_sleep.wait_for_rbac
   ]
 }
 
 # Create storage container3 with access type of 'private'
 resource "azurerm_storage_container" "pstorage_container3" {
   name                  = local.pstorage_container3
-  storage_account_name  = azurerm_storage_account.pc_storage.name 
+  storage_account_id    = azurerm_storage_account.pc_storage.id
   container_access_type = "private"
 
   depends_on = [
     azurerm_resource_group.pc_storage,
-    azurerm_storage_account.pc_storage
+    azurerm_storage_account.pc_storage,
+    azurerm_role_assignment.storage_contributor,
+    time_sleep.wait_for_rbac
   ]
 }
 
@@ -313,45 +355,47 @@ resource "azurerm_storage_blob" "hr3_xlsx" {
 # Azure files share name - HR
 resource "azurerm_storage_share" "pc_hr" {
   name                 = var.hr_share
-  storage_account_name = azurerm_storage_account.pc_storage.name
+  storage_account_id   = azurerm_storage_account.pc_storage.id
   quota                = 50
 }
 
 # Azure files share name - Finance
 resource "azurerm_storage_share" "pc_finance" {
   name                 = var.finance_share
-  storage_account_name = azurerm_storage_account.pc_storage.name
+  storage_account_id   = azurerm_storage_account.pc_storage.id
   quota                = 50
 }
 
 # Sample HR file
 resource "azurerm_storage_share_file" "hr1" {
   name             = var.hr_file1
-  storage_share_id = azurerm_storage_share.pc_hr.id
+  storage_share_id = "https://${azurerm_storage_account.pc_storage.name}.file.core.windows.net/${azurerm_storage_share.pc_hr.name}"
   source           = "${path.module}/data/hr.xlsx"
+  depends_on       = [time_sleep.wait_for_rbac]
 }
 
 # Sample Finance file
 resource "azurerm_storage_share_file" "finance1" {
   name             = var.finance_file1
-  storage_share_id = azurerm_storage_share.pc_finance.id
+  storage_share_id = "https://${azurerm_storage_account.pc_storage.name}.file.core.windows.net/${azurerm_storage_share.pc_finance.name}"
   source           = "${path.module}/data/finance.xlsx"
+  depends_on       = [time_sleep.wait_for_rbac]
 }
 
-# Azure Keyvault
-data "azurerm_client_config" "current" {}
+# Azure Keyvault (reuse client_config from above)
+# data "azurerm_client_config" "current" {} is now data "azurerm_client_config" "current_client"
 
 resource "azurerm_key_vault" "purplecloud" {
   name                       = local.pstorage_friendly_name
   location                   = azurerm_resource_group.pc_storage.location
   resource_group_name        = azurerm_resource_group.pc_storage.name
-  tenant_id                  = data.azurerm_client_config.current.tenant_id
+  tenant_id                  = data.azurerm_client_config.current_client.tenant_id
   sku_name                   = "premium"
   soft_delete_retention_days = 7
 
   access_policy {
-    tenant_id = data.azurerm_client_config.current.tenant_id
-    object_id = data.azurerm_client_config.current.object_id
+    tenant_id = data.azurerm_client_config.current_client.tenant_id
+    object_id = data.azurerm_client_config.current_client.object_id
 
     certificate_permissions = [
       "Create",
@@ -376,11 +420,13 @@ resource "azurerm_key_vault" "purplecloud" {
       "Delete",
       "Encrypt",
       "Get",
+      "GetRotationPolicy",
       "Import",
       "List",
       "Purge",
       "Recover",
       "Restore",
+      "SetRotationPolicy",
       "Sign",
       "UnwrapKey",
       "Update",
@@ -433,6 +479,10 @@ resource "azurerm_key_vault_key" "purplecloud_generated" {
     "verify",
     "wrapKey",
   ]
+
+  lifecycle {
+    ignore_changes = [rotation_policy]
+  }
 }
 
 resource "azurerm_key_vault_certificate" "purplecloud" {
@@ -567,6 +617,10 @@ terraform {
       source = "hashicorp/azurerm"
       version = "=4.14.0"
     }
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.11"
+    }
   }
 }
 
@@ -576,6 +630,7 @@ provider "azurerm" {
       prevent_deletion_if_contains_resources = false
     }
   }
+  storage_use_azuread = true
 }
 
 '''
@@ -603,8 +658,21 @@ default_storage_template = get_storage_template()
 # replace the location variable
 storage_template = default_storage_template.replace("STORAGE_LOCATION",default_location) 
 
-# replace the name variable
+# replace the name variable for resource group and key vault
 storage_template = storage_template.replace("PURPLECLOUD-FRIENDLY",default_name) 
+
+# Sanitize storage account name (lowercase alphanumeric only, max 19 chars to allow for 5-char suffix)
+import re
+storage_account_name = re.sub(r'[^a-z0-9]', '', default_name.lower())[:19]
+# Ensure minimum length of 3
+if len(storage_account_name) < 3:
+    storage_account_name = "purplecloud"
+    print("[-] Storage account name too short after sanitization, using default: ", storage_account_name)
+else:
+    print("[+] Storage account name (sanitized): ", storage_account_name)
+
+# replace the storage account name
+storage_template = storage_template.replace("PURPLECLOUD-STORAGE", storage_account_name)
 
 # write the file
 n = storage_text_file.write(storage_template)
